@@ -18,7 +18,7 @@
 
 namespace fs = std::filesystem;
 
-#define BLOCK_DEVICE "/dev/nvme1n1"
+#define BLOCK_DEVICE "/dev/nvme0n1p3"
 #define CHECK_EXTENT_PAGE_STATE(expected_state, start_pid, pg_cnt)                   \
   ({                                                                                 \
     EXPECT_EQ(this->buffer_->GetPageState(start_pid).LockState(), (expected_state)); \

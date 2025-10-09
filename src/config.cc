@@ -5,7 +5,7 @@
 
 // -----------------------------------------------------------------------------------
 /* System in general */
-DEFINE_string(db_path, "/dev/database/main", "Default database path");
+DEFINE_string(db_path, "/dev/nvme0n1p3", "Default database path");
 DEFINE_string(exmap_path, "/dev/exmap0", "Default Exmap path");
 DEFINE_uint32(worker_count, 16, "The number of workers");
 DEFINE_uint32(page_provider_thread, 0, "Number of page provider threads");
@@ -68,7 +68,7 @@ DEFINE_bool(txn_collect_state_during_flush, true,
             "Whether we collect the consistent state for the subsequent commit round during log flush");
 // -----------------------------------------------------------------------------------
 /* BLOB */
-DEFINE_bool(blob_enable, false, "Whether to enable Blob functionalities");
+DEFINE_bool(blob_enable, true, "Whether to enable Blob functionalities");
 DEFINE_bool(blob_tail_extent, true, "Whether to enable Tail Extent or not");
 DEFINE_bool(blob_normal_buffer_pool, false,
             "Extra overheads to emulate normal buffer pool"

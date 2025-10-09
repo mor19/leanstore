@@ -102,37 +102,37 @@ int main() {
 				}
 
 				// Shadow pages
-				for (unsigned i = 0; i < 512;  i++) {
-					interfaces[thread_id]->iov[i].page = thread_id * 512 + i;
-					interfaces[thread_id]->iov[i].len = 1;
-				}
-				struct exmap_action_params shadow_params = {
-					.interface 	= static_cast<uint16_t>(thread_id),
-					.iov_len   	= 512,
-					.opcode    	= EXMAP_OP_SHADOW,
-					.page_id 		= static_cast<uint64_t>(thread_count + thread_id) * 512,
-				};
-				if (ioctl(exmap_fd, EXMAP_IOCTL_ACTION, &shadow_params) != 0) {
-					PERR("ioctl: exmap_shadow");
-				}
-				for (unsigned i = 0; i < 512;  i++) {
-					unsigned ori_addr = (thread_id * 512 + i) * PAGE_SIZE;
-					unsigned shadow_addr = (thread_count * 512 + thread_id * 512 + i) * PAGE_SIZE;
-					if (exmap[ori_addr] != exmap[shadow_addr]) {
-						printf("Die - Idx[%u]: Original addr[%u]=%d - shadow addr[%u]=%d\n",
-								 	 i, ori_addr, exmap[ori_addr], shadow_addr, exmap[shadow_addr]);
-						throw std::exception();
-					}
-				}
+				// for (unsigned i = 0; i < 512;  i++) {
+				// 	interfaces[thread_id]->iov[i].page = thread_id * 512 + i;
+				// 	interfaces[thread_id]->iov[i].len = 1;
+				// }
+				// struct exmap_action_params shadow_params = {
+				// 	.interface 	= static_cast<uint16_t>(thread_id),
+				// 	.iov_len   	= 512,
+				// 	.opcode    	= EXMAP_OP_SHADOW,
+				// 	.page_id 		= static_cast<uint64_t>(thread_count + thread_id) * 512,
+				// };
+				// if (ioctl(exmap_fd, EXMAP_IOCTL_ACTION, &shadow_params) != 0) {
+				// 	PERR("ioctl: exmap_shadow");
+				// }
+				// for (unsigned i = 0; i < 512;  i++) {
+				// 	unsigned ori_addr = (thread_id * 512 + i) * PAGE_SIZE;
+				// 	unsigned shadow_addr = (thread_count * 512 + thread_id * 512 + i) * PAGE_SIZE;
+				// 	if (exmap[ori_addr] != exmap[shadow_addr]) {
+				// 		printf("Die - Idx[%u]: Original addr[%u]=%d - shadow addr[%u]=%d\n",
+				// 				 	 i, ori_addr, exmap[ori_addr], shadow_addr, exmap[shadow_addr]);
+				// 		throw std::exception();
+				// 	}
+				// }
 
-				// Un-shadow pages
-				struct exmap_action_params rm_shadow_params = {
-					.interface 	= static_cast<uint16_t>(thread_id),
-					.opcode    	= EXMAP_OP_RM_SD,
-				};
-				if (ioctl(exmap_fd, EXMAP_IOCTL_ACTION, &rm_shadow_params) != 0) {
-					PERR("ioctl: exmap_remove_shadow");
-				}
+				// // Un-shadow pages
+				// struct exmap_action_params rm_shadow_params = {
+				// 	.interface 	= static_cast<uint16_t>(thread_id),
+				// 	.opcode    	= EXMAP_OP_RM_SD,
+				// };
+				// if (ioctl(exmap_fd, EXMAP_IOCTL_ACTION, &rm_shadow_params) != 0) {
+				// 	PERR("ioctl: exmap_remove_shadow");
+				// }
 
 				// Free pages
 				for (unsigned i = 0; i < 512;  i++) {
@@ -167,19 +167,19 @@ int main() {
 		t.join();
 
 	// Now test - not remove shadow pages
-	for (unsigned i = 0; i < 512;  i++) {
-		interfaces[0]->iov[i].page = i;
-		interfaces[0]->iov[i].len = 1;
-	}
-	struct exmap_action_params shadow_params = {
-		.interface 	= 0,
-		.iov_len   	= 512,
-		.opcode    	= EXMAP_OP_SHADOW,
-		.page_id 		= static_cast<uint64_t>(thread_count) * 512,
-	};
-	if (ioctl(exmap_fd, EXMAP_IOCTL_ACTION, &shadow_params) != 0) {
-		PERR("ioctl: exmap_shadow");
-	}
+	// for (unsigned i = 0; i < 512;  i++) {
+	// 	interfaces[0]->iov[i].page = i;
+	// 	interfaces[0]->iov[i].len = 1;
+	// }
+	// struct exmap_action_params shadow_params = {
+	// 	.interface 	= 0,
+	// 	.iov_len   	= 512,
+	// 	.opcode    	= EXMAP_OP_SHADOW,
+	// 	.page_id 		= static_cast<uint64_t>(thread_count) * 512,
+	// };
+	// if (ioctl(exmap_fd, EXMAP_IOCTL_ACTION, &shadow_params) != 0) {
+	// 	PERR("ioctl: exmap_shadow");
+	// }
 
 	// Exmap close should still be fine
 	close(exmap_fd);

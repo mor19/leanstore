@@ -1004,8 +1004,8 @@ typedef int (*exmap_action_fptr)(struct exmap_ctx *, struct exmap_action_params 
 static exmap_action_fptr exmap_action_array[] = {
 	[EXMAP_OP_ALLOC]  = &exmap_alloc,
 	[EXMAP_OP_FREE]   = &exmap_free,
-	[EXMAP_OP_SHADOW] = &exmap_shadow,
-	[EXMAP_OP_RM_SD] 	= &exmap_remove_shadow,
+	// [EXMAP_OP_SHADOW] = &exmap_shadow,
+	// [EXMAP_OP_RM_SD] 	= &exmap_remove_shadow,
 };
 
 static long exmap_ioctl (struct file *file, unsigned int cmd, unsigned long arg)

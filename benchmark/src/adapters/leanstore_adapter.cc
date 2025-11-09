@@ -3,6 +3,7 @@
 #include "benchmark/fuse/schema.h"
 #include "benchmark/gitclone/schema.h"
 #include "benchmark/tatp/schema.h"
+#include "benchmark/tpch/schema.h"
 #include "benchmark/tpcc/schema.h"
 #include "benchmark/utils/test_utils.h"
 #include "benchmark/wikipedia/schema.h"
@@ -175,6 +176,16 @@ auto LeanStoreAdapter<RecordBase>::LookUpBlob(std::span<u8> blob_payload,
 template struct LeanStoreAdapter<benchmark::RelationTest>;
 template struct LeanStoreAdapter<benchmark::VariableSizeRelation>;
 template struct LeanStoreAdapter<leanstore::fuse::FileRelation>;
+
+// For TPC-H
+template struct LeanStoreAdapter<tpch::PartType>;
+template struct LeanStoreAdapter<tpch::SupplierType>;
+template struct LeanStoreAdapter<tpch::PartSuppType>;
+template struct LeanStoreAdapter<tpch::CustomerType>;
+template struct LeanStoreAdapter<tpch::OrdersType>;
+template struct LeanStoreAdapter<tpch::LineItemType>;
+template struct LeanStoreAdapter<tpch::NationType>;
+template struct LeanStoreAdapter<tpch::RegionType>;
 
 // For TPC-C
 template struct LeanStoreAdapter<tpcc::WarehouseType>;

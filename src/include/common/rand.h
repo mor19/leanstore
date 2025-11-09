@@ -11,6 +11,7 @@
 #include <utility>
 #include <vector>
 
+
 class MersenneTwister {
  private:
   static constexpr int NN       = 312;

@@ -34,3 +34,16 @@
 ### Testing
 
 `cd build && make test`
+
+### Benchmarking
+activate cycles
+```shell
+sudo sysctl -w kernel.kptr_restrict=0
+sudo sysctl -w kernel.perf_event_paranoid=-1
+```
+
+deactivate cycles
+```shell
+sudo sysctl -w kernel.kptr_restrict=1
+sudo sysctl -w kernel.perf_event_paranoid=4
+```

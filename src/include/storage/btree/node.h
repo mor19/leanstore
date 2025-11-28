@@ -91,6 +91,7 @@ struct BTreeNodeHeader {
   leng_t data_offset = static_cast<leng_t>(PAGE_SIZE);  // where we start moving payload to
   leng_t prefix_len  = 0;
   std::array<u8, 4> hints[HINT_COUNT];
+  blob::BlobState* columnar_values = nullptr; // pointer to in nodes with with leaf children
 
   explicit BTreeNodeHeader(bool is_leaf);
   ~BTreeNodeHeader() = default;
@@ -115,7 +116,7 @@ template <class NodeHeader>
 class alignas(PAGE_SIZE) BTreeNodeImpl : public PageHeader {
  public:
   static constexpr u32 MAX_RECORD_SIZE =
-    ((PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader) - (3 * sizeof(PageSlot)))) / 3;
+    ((PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader) - (3 * sizeof(PageSlot)))) / 3; // minium of 3 key+value pairs per node
 
   NodeHeader header;
   PageSlot slots[(PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader)) / sizeof(PageSlot)];

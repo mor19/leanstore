@@ -177,7 +177,7 @@ void LeanStore::RegisterTable(const std::type_index &relation) {
   assert(FLAGS_worker_count > 0);
   worker_pool.ScheduleSyncJob(0, [&]() {
     transaction_manager->StartTransaction(leanstore::transaction::Transaction::Type::SYSTEM);
-    indexes.try_emplace(relation, std::make_unique<storage::BTree>(buffer_pool.get(), false));
+    indexes.try_emplace(relation, std::make_unique<storage::BTree>(buffer_pool.get(), blob_manager.get(), false));
     CommitTransaction();
   });
 }

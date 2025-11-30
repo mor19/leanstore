@@ -35,7 +35,6 @@ std::vector<std::vector<std::pair<Integer, Integer>>> supp_stock_map(10000);
 
 template <template <typename> class AdapterType>
 void TPCCWorkloadExtended<AdapterType>::Query2() {
-  // TODO(moritz)
   // Pick target region
   Integer target_region = UniformRand(0, 4);
   // Scan region

@@ -569,7 +569,7 @@ auto BTree::ConvertIntoBlobFormatHelper(OptimisticGuard<BTreeNode> &node, u32 co
     // TODO(moritz): exclusive locks?
     // ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
     // ExclusiveGuard<BTreeNode> node_locked(std::move(node));
-    // TODO(moritz): add leaf parent inner node logic
+    // TODO(moritz): add leaf parent inner node logic (type attribute instead of isleaf?)
 
     // count total size in bytes required
     size_t total_size = sizeof(ColumnarValues) + sizeof(ColumnInfo) * column_count;
@@ -616,13 +616,13 @@ auto BTree::ConvertIntoBlobFormatHelper(OptimisticGuard<BTreeNode> &node, u32 co
     }
 
     // reformat tmp_data into ColumnarValue
-    u8 *tmp_buffer = reinterpret_cast<u8 *>(std::malloc(total_size));  // TODO(moritz): replace with mor eefficient!
+    u8 *tmp_buffer = reinterpret_cast<u8 *>(std::malloc(total_size));  // TODO(moritz): replace with more efficient!
     ColumnarValues *tmp_colval = reinterpret_cast<ColumnarValues *>(tmp_buffer);
     tmp_colval->column_count   = column_count;
     tmp_colval->element_count  = tmp_data[0].size();  // all columns should contain the same amount of values
     size_t offset              = sizeof(ColumnarValues) + sizeof(ColumnInfo) * column_count;
     for (u32 col_idx = 0; col_idx < column_count; col_idx++) {
-      tmp_colval->column_infos[col_idx].size   = tmp_data[col_idx][0].size();  // TODO(moritz): size from param!!!
+      tmp_colval->column_infos[col_idx].size   = tmp_data[col_idx][0].size();  // TODO(moritz): size from param!!! (to make varchar->size=0 possible)
       tmp_colval->column_infos[col_idx].offset = offset;
       for (auto &s_val : tmp_data[col_idx]) {
         std::memcpy(tmp_buffer + offset, s_val.data(), s_val.size());
@@ -630,7 +630,7 @@ auto BTree::ConvertIntoBlobFormatHelper(OptimisticGuard<BTreeNode> &node, u32 co
       }
     }
     // write out blob
-    this->blob_->AllocateBlob({tmp_buffer, total_size}, nullptr, false);  // TODO(moritz): transaction?
+    this->blob_->AllocateBlob({tmp_buffer, total_size}, nullptr, false);  // TODO(moritz): active transaction required?
     // free buffer
     std::free(tmp_buffer);
     // return

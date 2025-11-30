@@ -21,7 +21,7 @@ class TestBTree : public BaseTest {
   void SetUp() override {
     BaseTest::SetupTestFile();
     InitRandTransaction();
-    tree_ = std::make_unique<BTree>(buffer_.get());
+    tree_ = std::make_unique<BTree>(buffer_.get(), blob_.get());
   }
 
   void TearDown() override {

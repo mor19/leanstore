@@ -31,7 +31,7 @@ namespace leanstore::storage {
 leng_t BTree::btree_slot_counter = 0;
 
 BTree::BTree(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager, bool append_bias)
-    : buffer_(buffer_pool), blob_(blob_manager), append_bias_(append_bias) {
+    : buffer_(buffer_pool), append_bias_(append_bias), blob_(blob_manager) {
   ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
   ExclusiveGuard<BTreeNode> root_page(buffer_, buffer_->AllocPage());
   new (root_page.Ptr()) storage::BTreeNode(true);
@@ -588,7 +588,8 @@ auto BTree::ConvertIntoBlobFormatHelper(OptimisticGuard<BTreeNode> &node, u32 co
           total_size = total_size + tmp_key[col_idx].size();
         }
         // payload
-        std::vector<std::span<u8>> tmp_values = this->SplitRecord(std::get<1>(sizes), child.Ptr()->GetPayload(entry_idx).data());
+        std::vector<std::span<u8>> tmp_values =
+          this->SplitRecord(std::get<1>(sizes), child.Ptr()->GetPayload(entry_idx).data());
         for (u32 payload_col_idx = 0; payload_col_idx < tmp_values.size(); col_idx++, payload_col_idx++) {
           tmp_data[col_idx].push_back(tmp_values[payload_col_idx]);
           total_size = total_size + tmp_values[payload_col_idx].size();
@@ -597,21 +598,22 @@ auto BTree::ConvertIntoBlobFormatHelper(OptimisticGuard<BTreeNode> &node, u32 co
     }
     OptimisticGuard<BTreeNode> child(buffer_, node->header.right_most_child);
     for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
-        // key
-        // TODO(moritz): complete key?
-        std::vector<std::span<u8>> tmp_key = this->SplitRecord(std::get<0>(sizes), child.Ptr()->GetKey(entry_idx));
-        u32 col_idx                        = 0;
-        for (; col_idx < tmp_key.size(); col_idx++) {
-          tmp_data[col_idx].push_back(tmp_key[col_idx]);
-          total_size = total_size + tmp_key[col_idx].size();
-        }
-        // payload
-        std::vector<std::span<u8>> tmp_values = this->SplitRecord(std::get<1>(sizes), child.Ptr()->GetPayload(entry_idx).data());
-        for (u32 payload_col_idx = 0; payload_col_idx < tmp_values.size(); col_idx++, payload_col_idx++) {
-          tmp_data[col_idx].push_back(tmp_values[payload_col_idx]);
-          total_size = total_size + tmp_values[payload_col_idx].size();
-        }
+      // key
+      // TODO(moritz): complete key?
+      std::vector<std::span<u8>> tmp_key = this->SplitRecord(std::get<0>(sizes), child.Ptr()->GetKey(entry_idx));
+      u32 col_idx                        = 0;
+      for (; col_idx < tmp_key.size(); col_idx++) {
+        tmp_data[col_idx].push_back(tmp_key[col_idx]);
+        total_size = total_size + tmp_key[col_idx].size();
       }
+      // payload
+      std::vector<std::span<u8>> tmp_values =
+        this->SplitRecord(std::get<1>(sizes), child.Ptr()->GetPayload(entry_idx).data());
+      for (u32 payload_col_idx = 0; payload_col_idx < tmp_values.size(); col_idx++, payload_col_idx++) {
+        tmp_data[col_idx].push_back(tmp_values[payload_col_idx]);
+        total_size = total_size + tmp_values[payload_col_idx].size();
+      }
+    }
 
     // reformat tmp_data into ColumnarValue
     u8 *tmp_buffer = reinterpret_cast<u8 *>(std::malloc(total_size));  // TODO(moritz): replace with mor eefficient!

@@ -7,6 +7,7 @@
 #include "benchmark/utils/test_utils.h"
 #include "benchmark/wikipedia/schema.h"
 #include "benchmark/ycsb/schema.h"
+#include "benchmark/tpcc_extended/schema_extended.h"
 #include "leanstore/schema.h"
 
 #include <span>
@@ -188,6 +189,11 @@ template struct LeanStoreAdapter<tpcc::OrderWDCType>;
 template struct LeanStoreAdapter<tpcc::OrderLineType>;
 template struct LeanStoreAdapter<tpcc::ItemType>;
 template struct LeanStoreAdapter<tpcc::StockType>;
+
+// For TPC-C Extended
+template struct LeanStoreAdapter<tpcc::NationType>;
+template struct LeanStoreAdapter<tpcc::RegionType>;
+template struct LeanStoreAdapter<tpcc::SupplierType>;
 
 // For TATP
 template struct LeanStoreAdapter<tatp::SubscriberType>;

@@ -22,6 +22,7 @@ endfunction()
 # All benchmarks
 # ---------------------------------------------------------------------------
 add_benchmark(LeanStore_TPCC main/leanstore_tpcc.cc)
+add_benchmark(LeanStore_TPCC_Extended main/leanstore_tpcc_extended.cc)
 add_benchmark(LeanStore_TATP main/leanstore_tatp.cc)
 add_benchmark(LeanStore_MixWorkloads main/leanstore_mixed.cc)
 add_benchmark(LeanStore_YCSB main/ycsb/leanstore_ycsb.cc)

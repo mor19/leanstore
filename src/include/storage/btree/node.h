@@ -91,7 +91,6 @@ struct BTreeNodeHeader {
   leng_t data_offset = static_cast<leng_t>(PAGE_SIZE);  // where we start moving payload to
   leng_t prefix_len  = 0;
   std::array<u8, 4> hints[HINT_COUNT];
-  blob::BlobState* columnar_values = nullptr; // pointer to in nodes with with leaf children
 
   explicit BTreeNodeHeader(bool is_leaf);
   ~BTreeNodeHeader() = default;

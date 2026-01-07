@@ -30,8 +30,8 @@ namespace leanstore::storage {
 
 leng_t BTree::btree_slot_counter = 0;
 
-BTree::BTree(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager, bool append_bias)
-    : buffer_(buffer_pool), append_bias_(append_bias), blob_(blob_manager) {
+BTree::BTree(buffer::BufferManager *buffer_pool, bool append_bias)
+    : buffer_(buffer_pool), append_bias_(append_bias) {
   ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
   ExclusiveGuard<BTreeNode> root_page(buffer_, buffer_->AllocPage());
   new (root_page.Ptr()) storage::BTreeNode(true);
@@ -491,12 +491,6 @@ auto BTree::CountEntries() -> u64 {
   return IterateAllNodes(node, [](BTreeNode &) { return 0; }, [](BTreeNode &node) { return node.header.count; });
 }
 
-void BTree::ConvertIntoBlobFormat(u32 column_count, const std::tuple<std::vector<u32>, std::vector<u32>> &sizes) {
-  OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
-
-  ConvertIntoBlobFormatHelper(node, column_count, sizes);
-}
 
 // -------------------------------------------------------------------------------------
 
@@ -544,106 +538,6 @@ auto BTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp
       return true;
     } catch (const sync::RestartException &) {}
   }
-}
-
-auto BTree::SplitRecord(const std::vector<u32> &sizes, u8 *data) -> std::vector<std::span<u8>> {
-  std::vector<std::span<u8>> res;
-  res.reserve(sizes.size());
-  u8 *ptr = data;
-  for (auto size : sizes) {
-    res.push_back({ptr, size});
-    ptr += size;
-  }
-  return res;
-}
-
-auto BTree::ConvertIntoBlobFormatHelper(OptimisticGuard<BTreeNode> &node, u32 column_count,
-                                        const std::tuple<std::vector<uint32_t>, std::vector<uint32_t>> &sizes) -> bool {
-  if (!node->IsInner() || node->header.count == 0) {
-    return true;
-  }  // TODO(moritz): header count == 0 not possible in inner nodes?
-  // check first child if it is a leaf node, to find out if the current node is a leaf parent
-  OptimisticGuard<BTreeNode> firstChild(buffer_, node->GetChild(0));
-  if (ConvertIntoBlobFormatHelper(firstChild, column_count, sizes)) {
-    // current node is leaf parent
-    // TODO(moritz): exclusive locks?
-    // ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
-    // ExclusiveGuard<BTreeNode> node_locked(std::move(node));
-    // TODO(moritz): add leaf parent inner node logic (type attribute instead of isleaf?)
-
-    // count total size in bytes required
-    size_t total_size = sizeof(ColumnarValues) + sizeof(ColumnInfo) * column_count;
-    std::vector<std::vector<std::span<u8>>> tmp_data;
-    tmp_data.resize(column_count);
-    // read all children
-    for (auto idx = 0; idx < node->header.count; idx++) {
-      OptimisticGuard<BTreeNode> child(buffer_, node->GetChild(idx));
-      for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
-        // key
-        // TODO(moritz): complete key?
-        std::vector<std::span<u8>> tmp_key = this->SplitRecord(std::get<0>(sizes), child.Ptr()->GetKey(entry_idx));
-        u32 col_idx                        = 0;
-        for (; col_idx < tmp_key.size(); col_idx++) {
-          tmp_data[col_idx].push_back(tmp_key[col_idx]);
-          total_size = total_size + tmp_key[col_idx].size();
-        }
-        // payload
-        std::vector<std::span<u8>> tmp_values =
-          this->SplitRecord(std::get<1>(sizes), child.Ptr()->GetPayload(entry_idx).data());
-        for (u32 payload_col_idx = 0; payload_col_idx < tmp_values.size(); col_idx++, payload_col_idx++) {
-          tmp_data[col_idx].push_back(tmp_values[payload_col_idx]);
-          total_size = total_size + tmp_values[payload_col_idx].size();
-        }
-      }
-    }
-    OptimisticGuard<BTreeNode> child(buffer_, node->header.right_most_child);
-    for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
-      // key
-      // TODO(moritz): complete key?
-      std::vector<std::span<u8>> tmp_key = this->SplitRecord(std::get<0>(sizes), child.Ptr()->GetKey(entry_idx));
-      u32 col_idx                        = 0;
-      for (; col_idx < tmp_key.size(); col_idx++) {
-        tmp_data[col_idx].push_back(tmp_key[col_idx]);
-        total_size = total_size + tmp_key[col_idx].size();
-      }
-      // payload
-      std::vector<std::span<u8>> tmp_values =
-        this->SplitRecord(std::get<1>(sizes), child.Ptr()->GetPayload(entry_idx).data());
-      for (u32 payload_col_idx = 0; payload_col_idx < tmp_values.size(); col_idx++, payload_col_idx++) {
-        tmp_data[col_idx].push_back(tmp_values[payload_col_idx]);
-        total_size = total_size + tmp_values[payload_col_idx].size();
-      }
-    }
-
-    // reformat tmp_data into ColumnarValue
-    u8 *tmp_buffer = reinterpret_cast<u8 *>(std::malloc(total_size));  // TODO(moritz): replace with more efficient!
-    ColumnarValues *tmp_colval = reinterpret_cast<ColumnarValues *>(tmp_buffer);
-    tmp_colval->column_count   = column_count;
-    tmp_colval->element_count  = tmp_data[0].size();  // all columns should contain the same amount of values
-    size_t offset              = sizeof(ColumnarValues) + sizeof(ColumnInfo) * column_count;
-    for (u32 col_idx = 0; col_idx < column_count; col_idx++) {
-      tmp_colval->column_infos[col_idx].size   = tmp_data[col_idx][0].size();  // TODO(moritz): size from param!!! (to make varchar->size=0 possible)
-      tmp_colval->column_infos[col_idx].offset = offset;
-      for (auto &s_val : tmp_data[col_idx]) {
-        std::memcpy(tmp_buffer + offset, s_val.data(), s_val.size());
-        offset = offset + s_val.size();
-      }
-    }
-    // write out blob
-    this->blob_->AllocateBlob({tmp_buffer, total_size}, nullptr, false);  // TODO(moritz): active transaction required?
-    // free buffer
-    std::free(tmp_buffer);
-    // return
-    return false;
-  } else {
-    for (auto idx = 1; idx < node->header.count; idx++) {
-      OptimisticGuard<BTreeNode> child(buffer_, node->GetChild(idx));
-      ConvertIntoBlobFormatHelper(child, column_count, sizes);
-    }
-  }
-  OptimisticGuard<BTreeNode> child(buffer_, node->header.right_most_child);
-  ConvertIntoBlobFormatHelper(child, column_count, sizes);
-  return false;
 }
 
 }  // namespace leanstore::storage

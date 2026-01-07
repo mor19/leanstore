@@ -24,7 +24,7 @@ class TestBTreeColumnar : public BaseTest {
   void SetUp() override {
     BaseTest::SetupTestFile();
     InitRandTransaction();
-    tree_ = std::make_unique<BTree>(buffer_.get(), blob_.get());
+    tree_ = std::make_unique<BTree>(buffer_.get());
   }
 
   void TearDown() override {
@@ -54,16 +54,15 @@ class TestBTreeColumnar : public BaseTest {
   }
 };
 
-TEST_F(TestBTreeColumnar, ConvertIntoBlobFormat) {
-  std::vector<std::pair<int, __uint128_t>> data;
-  PrepareData<__uint128_t>(data, true);
+// TEST_F(TestBTreeColumnar, ConvertIntoBlobFormat) {
+//   std::vector<std::pair<int, __uint128_t>> data;
+//   PrepareData<__uint128_t>(data, true);
 
-  std::vector<u32> key_size = std::vector<u32>();
-  key_size.push_back(sizeof(int));
-  std::vector<u32> value_sizes = std::vector<u32>();
-  value_sizes.push_back(sizeof(__uint128_t));
-  tree_->ConvertIntoBlobFormat(2, std::tuple(key_size, value_sizes));
-  //TODO(moritz): improve test
-}
+//   std::vector<u32> key_size = std::vector<u32>();
+//   key_size.push_back(sizeof(int));
+//   std::vector<u32> value_sizes = std::vector<u32>();
+//   value_sizes.push_back(sizeof(__uint128_t));
+//   //TODO(moritz):  test
+// }
 
 }  // namespace leanstore::storage

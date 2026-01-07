@@ -25,7 +25,7 @@ class BTree : public KVInterface {
  public:
   static leng_t btree_slot_counter;  // Counter to initialize B-Tree in metadata page
 
-  explicit BTree(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager, bool append_bias = false);
+  explicit BTree(buffer::BufferManager *buffer_pool, bool append_bias = false);
   ~BTree() override = default;
 
   /* BTree config*/
@@ -46,8 +46,6 @@ class BTree : public KVInterface {
   auto SizeInMB() -> float override;
   auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp,
                   const PayloadFunc &read_cb) -> bool override;
-  void ConvertIntoBlobFormat(u32 column_count, const std::tuple<std::vector<u32>, std::vector<u32>> &sizes); // TODO(moritz)
-  // void ScanColumns() override; // TODO(moritz)
 
   // -------------------------------------------------------------------------------------
   /* APIs for use within LeanStore */
@@ -76,15 +74,10 @@ class BTree : public KVInterface {
   buffer::BufferManager *buffer_;
   leng_t metadata_slotid_;
   std::atomic<bool> append_bias_;
-  /* columnar values property */
-  blob::BlobManager *blob_;
 
   /* Comparison properties */
   ComparisonLambda cmp_lambda_{ComparisonOperator::MEMCMP, std::memcmp};
 
-  /* Convert into blob format utility */
-  auto ConvertIntoBlobFormatHelper(sync::OptimisticGuard<BTreeNode> &node, u32 column_count, const std::tuple<std::vector<uint32_t>, std::vector<uint32_t>> &sizes) -> bool;
-  auto SplitRecord(const std::vector<u32> &sizes, u8* data) -> std::vector<std::span<u8>>;
 };
 
 }  // namespace leanstore::storage

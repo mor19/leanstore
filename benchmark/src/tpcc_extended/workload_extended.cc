@@ -38,7 +38,7 @@ void TPCCWorkloadExtended<AdapterType>::Query2() {
   // Pick target region
   Integer target_region = UniformRand(0, 4);
   // Scan region
-  this->region.Scan({0}, [&](const RegionType::Key &r_key, const RegionType &r_rec) {
+  this->region.Scan({target_region}, [&](const RegionType::Key &r_key, const RegionType &r_rec) {
     (void)r_rec;
     if (r_key.r_regionkey == target_region) {
       // found target region
@@ -100,7 +100,7 @@ void TPCCWorkloadExtended<AdapterType>::Query2() {
       });
       return false;
     }
-    return true;
+    return false; // not directly found -> not in region table
   });
 }
 

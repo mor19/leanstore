@@ -8,6 +8,7 @@
 #include "benchmark/wikipedia/schema.h"
 #include "benchmark/ycsb/schema.h"
 #include "benchmark/tpcc_extended/schema_extended.h"
+#include "benchmark/fts/schema.h"
 #include "leanstore/schema.h"
 
 #include <span>
@@ -194,6 +195,9 @@ template struct LeanStoreAdapter<tpcc::StockType>;
 template struct LeanStoreAdapter<tpcc::NationType>;
 template struct LeanStoreAdapter<tpcc::RegionType>;
 template struct LeanStoreAdapter<tpcc::SupplierType>;
+
+// For FTS
+template struct LeanStoreAdapter<fts::OrderLineType>;
 
 // For TATP
 template struct LeanStoreAdapter<tatp::SubscriberType>;

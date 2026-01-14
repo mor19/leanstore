@@ -13,7 +13,9 @@ struct LeanStoreFUSE {
   std::unique_ptr<LeanStoreAdapter<leanstore::fuse::FileRelation>> adapter;
 
   explicit LeanStoreFUSE(leanstore::LeanStore *db)
-      : db(db), adapter(std::make_unique<LeanStoreAdapter<leanstore::fuse::FileRelation>>(*db)) {}
+      : db(db),
+        adapter(std::make_unique<LeanStoreAdapter<leanstore::fuse::FileRelation>>(
+          *db, leanstore::fuse::FileRelation::ColumnSizes())) {}
 
   ~LeanStoreFUSE() = default;
 
@@ -60,8 +62,8 @@ struct LeanStoreFUSE {
 
   static auto Open([[maybe_unused]] const char *path, [[maybe_unused]] struct fuse_file_info *inf) -> int { return 0; }
 
-  static auto Read(const char *path, char *buf, size_t size, off_t offset,
-                   [[maybe_unused]] struct fuse_file_info *inf) -> int {
+  static auto Read(const char *path, char *buf, size_t size, off_t offset, [[maybe_unused]] struct fuse_file_info *inf)
+    -> int {
     int ret = 0;
 
     obj->db->worker_pool.ScheduleSyncJob(0, [&]() {

@@ -15,7 +15,8 @@ ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobMan
       hot_data(buffer_pool, append_bias),
       cold_data(),
       columnSizes(columnSizes),
-      allColumnIndices() {
+      allColumnIndices(),
+      row_id_to_key_index(buffer_pool, true) {
   // generate vector with all column indices
   for (u32 i = 0; i < this->columnSizes.size(); i++) { allColumnIndices.push_back(i); }
 }
@@ -85,6 +86,7 @@ void ColumnRowStore::Insert(std::span<u8> key, std::span<const u8> payload) {
   this->hot_data.Insert(U64ToSpanU8(row_id), payload);
   // insert row id into index
   this->row_id_index.Insert(key, U64ToSpanU8(row_id));
+  this->row_id_to_key_index.Insert(U64ToSpanU8(row_id), key);
 }
 
 auto ColumnRowStore::Remove(std::span<u8> key) -> bool {
@@ -95,7 +97,8 @@ auto ColumnRowStore::Remove(std::span<u8> key) -> bool {
     return false;
   }
   // remove row id from index
-  this->row_id_index.Remove(U64ToSpanU8(row_id));
+  this->row_id_index.Remove(key);
+  this->row_id_to_key_index.Remove(U64ToSpanU8(row_id));
   return this->InternalRemove(row_id);
 }
 
@@ -111,11 +114,16 @@ auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, cons
   // update = insert (without updating the row id of key) + delete old + update row-id index
   u64 new_row_id = next_row_id.fetch_add(1);
   hot_data.Insert(U64ToSpanU8(new_row_id), payload);
+  this->row_id_to_key_index.Insert(U64ToSpanU8(new_row_id), key);
   this->InternalRemove(row_id);
   row_id_index.Update(key, {reinterpret_cast<const u8 *>(&new_row_id), sizeof(new_row_id)}, nullptr);
+  this->row_id_to_key_index.Remove(U64ToSpanU8(row_id));
   return true;
 }
 
+/**
+ * func is used to modidy the current payload; delta is ignored!
+ */
 auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool {
   // get row id
   u64 row_id;
@@ -131,10 +139,14 @@ auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, F
   std::vector<u8> temp;
   this->hot_data.LookUp(U64ToSpanU8(row_id),
                         [&temp](std::span<u8> payload) { temp.assign(payload.begin(), payload.end()); });
-  delta->UpdateDeltaPayload(temp);
+  // IGNORING DELTA
+  (void)delta;
+  // delta->UpdateDeltaPayload(temp);
   hot_data.Insert(U64ToSpanU8(new_row_id), temp);
+  this->row_id_to_key_index.Insert(U64ToSpanU8(new_row_id), key);
   this->InternalRemove(row_id);
   row_id_index.Update(key, {reinterpret_cast<const u8 *>(&new_row_id), sizeof(new_row_id)}, nullptr);
+  this->row_id_to_key_index.Remove(U64ToSpanU8(row_id));
   return true;
 }
 
@@ -149,13 +161,27 @@ void ColumnRowStore::ScanDescending(std::span<u8> key, const AccessRecordFunc &f
   throw std::runtime_error("not implemented");
 }
 
+/**
+ * call with empty std::span<u8> as key to start from lowest row id
+ */
 void ColumnRowStore::ScanOptimized(std::span<u8> key, std::vector<u32> &column_idxs, const AccessRecordFunc &fn) {
   // TODO
   // get row id
   u64 row_id = 0;
-  row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); });
+  if (key.size() != 0) {
+    row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); });
+  }
   // hot data
-  hot_data.ScanAscending(U64ToSpanU8(row_id), fn);
+  bool found = false;
+  hot_data.ScanAscending(U64ToSpanU8(row_id), [&](std::span<u8> tmp_row_id, std::span<u8> tmp_payload) {
+    // get key (always exists!)
+    row_id_to_key_index.LookUp(tmp_row_id, [&](std::span<u8> tmp_key) {
+      // call fn
+      found = fn(tmp_key, tmp_payload);
+    });
+    return found;
+  });
+  if (!found) { return; }
   // cold data
   // record size estimate
   size_t estimatedRecordSize = 0;
@@ -168,9 +194,9 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, std::vector<u32> &column_i
     // TODO delete/merge empty chunk during iteration
     if (chunk.maxRowId < row_id) { continue; }
     // load blobs
-    blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void) data;});
+    blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void)data; });
     for (u32 column_idx : column_idxs) {
-      blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) {(void) data;});
+      blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) { (void)data; });
     }
     // build records & apply function
     for (u32 i = 0; i < chunk.count; i++) {
@@ -179,12 +205,14 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, std::vector<u32> &column_i
       // build record
       record.clear();
       for (u32 column_idx : column_idxs) {
-        record.insert(
-          record.end(), chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx]),
-          chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx] + columnSizes[column_idx]));
+        record.insert(record.end(), chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx]),
+                      chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx] + columnSizes[column_idx]));
       }
       // call fn
-      fn(std::span<u8>(), record);
+      if (!fn(std::span<u8>(), record)) {
+        // return if fn is false (similar to other scan)
+        return;
+      }
     }
     // TODO unload blobs?
   }

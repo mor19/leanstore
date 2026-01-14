@@ -67,6 +67,7 @@ class ColumnRowStore : public HKVInterface {
   std::vector<ColumnChunk> cold_data;
   std::vector<u32> columnSizes;
   std::vector<u32> allColumnIndices;  // contains all column indices
+  storage::BTree row_id_to_key_index; // reverse row id to key index (for cold data, this could/should be stored as extra blob)
 };
 
 }  // namespace leanstore::storage

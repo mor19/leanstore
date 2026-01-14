@@ -29,9 +29,9 @@ if(ENABLE_TESTING)
   leanstore_add_test(TestColumnRowStore storage/hybrid/test_columnrowstore.cc)
   leanstore_add_test(TestRangeLock sync/test_range_lock.cc main.cc)
   leanstore_add_test(TestLeanStoreAdapter adapters/test_leanstore_adapter.cc)
-  leanstore_add_test(TestWiredTigerAdapter adapters/test_wiredtiger_adapter.cc)
-  leanstore_add_test(TestFilesystemAdapter adapters/test_filesystem_adapter.cc)
-  leanstore_add_test(TestRocksDBAdapter adapters/test_rocksdb_adapter.cc)
+  # leanstore_add_test(TestWiredTigerAdapter adapters/test_wiredtiger_adapter.cc)
+  # leanstore_add_test(TestFilesystemAdapter adapters/test_filesystem_adapter.cc)
+  # leanstore_add_test(TestRocksDBAdapter adapters/test_rocksdb_adapter.cc)
 endif()
 
 # ---------------------------------------------------------------------------

@@ -7,6 +7,7 @@
 #include <functional>
 #include <span>
 #include <thread>
+#include <vector>
 
 static constexpr uint64_t GLOBAL_BLOCK_SIZE = 4096;
 
@@ -39,12 +40,15 @@ class Adapter {
   virtual void ScanDesc(const typename RecordBase::Key &key,
                         const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) = 0;
   // -------------------------------------------------------------------------------------
+  virtual void ScanOptimized(const typename RecordBase::Key &key, std::vector<uint32_t> &column_idxs,
+                             const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) = 0;
+  // -------------------------------------------------------------------------------------
   virtual void Insert(const typename RecordBase::Key &key, const RecordBase &record) = 0;
   // -------------------------------------------------------------------------------------
   virtual void Update(const typename RecordBase::Key &key, const RecordBase &record) = 0;
   // -------------------------------------------------------------------------------------
-  virtual auto LookUp(const typename RecordBase::Key &key,
-                      const Adapter<RecordBase>::AccessRecordFunc &callback) -> bool = 0;
+  virtual auto LookUp(const typename RecordBase::Key &key, const Adapter<RecordBase>::AccessRecordFunc &callback)
+    -> bool = 0;
   // -------------------------------------------------------------------------------------
   virtual auto UpdateInPlace(const typename RecordBase::Key &key, const Adapter<RecordBase>::ModifyRecordFunc &fn,
                              FixedSizeDelta *delta) -> bool = 0;
@@ -71,8 +75,8 @@ class Adapter {
    * @brief Expose BLOB APIs to the world
    */
   virtual auto RegisterBlob([[maybe_unused]] std::span<uint8_t> blob_payload,
-                            [[maybe_unused]] std::span<uint8_t> prev_blob_rep,
-                            [[maybe_unused]] bool likely_grow) -> std::span<const uint8_t> {
+                            [[maybe_unused]] std::span<uint8_t> prev_blob_rep, [[maybe_unused]] bool likely_grow)
+    -> std::span<const uint8_t> {
     return {};
   }
 

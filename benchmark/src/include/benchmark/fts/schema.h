@@ -5,6 +5,7 @@
 #include "typefold/typefold.h"
 
 #include <stdexcept>
+#include <vector>
 
 namespace fts {
 
@@ -47,6 +48,10 @@ struct OrderLineType {
   static auto MaxFoldLength() -> uint32_t {
     return 0 + sizeof(Key::ol_w_id) + sizeof(Key::ol_d_id) + sizeof(Key::ol_o_id) + sizeof(Key::ol_number);
   }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Integer), sizeof(Integer), sizeof(Timestamp), sizeof(Numeric), sizeof(Numeric), sizeof(Varchar<24>)};
+  }
 };
 
-}  // namespace tpcc
+}  // namespace fts

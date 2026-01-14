@@ -1,22 +1,22 @@
 #include "benchmark/adapters/leanstore_adapter.h"
 #include "benchmark/filebench/webserver/schema.h"
+#include "benchmark/fts/schema.h"
 #include "benchmark/fuse/schema.h"
 #include "benchmark/gitclone/schema.h"
 #include "benchmark/tatp/schema.h"
 #include "benchmark/tpcc/schema.h"
+#include "benchmark/tpcc_extended/schema_extended.h"
 #include "benchmark/utils/test_utils.h"
 #include "benchmark/wikipedia/schema.h"
 #include "benchmark/ycsb/schema.h"
-#include "benchmark/tpcc_extended/schema_extended.h"
-#include "benchmark/fts/schema.h"
 #include "leanstore/schema.h"
 
 #include <span>
 
 template <class RecordBase>
-LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db)
+LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db, std::vector<u32> columnSizes)
     : relation_(static_cast<std::type_index>(typeid(RecordBase))), db_(&db) {
-  db_->RegisterTable(relation_);
+  db_->RegisterTable(relation_, columnSizes);
   tree_ = db_->RetrieveIndex(relation_);
 }
 
@@ -69,6 +69,21 @@ template <class RecordBase>
 void LeanStoreAdapter<RecordBase>::ScanDesc(const typename RecordBase::Key &key,
                                             const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb) {
   ScanImpl(key, found_record_cb, false);
+}
+
+template <class RecordBase>
+void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key &r_key,
+                                                 std::vector<uint32_t> &column_idxs,
+                                                 const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb) {
+  u8 key[RecordBase::MaxFoldLength()];
+  auto len = RecordBase::FoldKey(key, r_key);
+
+  auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
+    typename RecordBase::Key typed_key;
+    RecordBase::UnfoldKey(key.data(), typed_key);
+    return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
+  };
+  tree_->ScanOptimized({key, len}, column_idxs, read_cb);
 }
 
 template <class RecordBase>
@@ -143,8 +158,8 @@ void LeanStoreAdapter<RecordBase>::MiniTransactionWrapper(const std::function<vo
 }
 
 template <class RecordBase>
-auto LeanStoreAdapter<RecordBase>::RegisterBlob(std::span<u8> blob_payload, std::span<u8> prev_blob,
-                                                bool likely_grow) -> std::span<const u8> {
+auto LeanStoreAdapter<RecordBase>::RegisterBlob(std::span<u8> blob_payload, std::span<u8> prev_blob, bool likely_grow)
+  -> std::span<const u8> {
   auto prev_btup = (prev_blob.empty()) ? nullptr : reinterpret_cast<leanstore::BlobState *>(prev_blob.data());
   return db_->CreateNewBlob(blob_payload, prev_btup, likely_grow);
 }

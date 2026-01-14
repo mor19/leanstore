@@ -5,6 +5,7 @@
 #include "typefold/typefold.h"
 
 #include <stdexcept>
+#include <vector>
 
 namespace tpcc {
 
@@ -33,6 +34,8 @@ struct NationType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::n_nationkey); }
+
+  static std::vector<uint32_t> ColumnSizes() { return {sizeof(Varchar<25>), sizeof(Integer), sizeof(Varchar<152>)}; }
 };
 
 struct RegionType {
@@ -59,6 +62,8 @@ struct RegionType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::r_regionkey); }
+
+  static std::vector<uint32_t> ColumnSizes() { return {sizeof(Varchar<25>), sizeof(Varchar<152>)}; }
 };
 
 struct SupplierType {
@@ -89,6 +94,11 @@ struct SupplierType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::su_suppkey); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Varchar<25>),      sizeof(Varchar<40>), sizeof(Integer),
+            sizeof(BytesPayload<15>), sizeof(Integer),     sizeof(Varchar<40>)};
+  }
 };
 
 }  // namespace tpcc

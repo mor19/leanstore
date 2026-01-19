@@ -367,7 +367,7 @@ void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vec
   // get keys and remove
   for (size_t i = 0; i + sizeof(u64) <= rowIds.size(); i += sizeof(u64)) {
     std::span<u8> id(rowIds.data() + i, sizeof(u64));
-    row_id_to_key_index.LookUp(id, [&](std::span<u8> pl) { keys.insert(keys.end(), id.begin(), id.end()); });
+    row_id_to_key_index.LookUp(id, [&](std::span<u8> pl) { keys.insert(keys.end(), pl.begin(), pl.end()); });
     row_id_to_key_index.Remove(id);
   }
   newColumnData.key_column     = blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false);

@@ -595,7 +595,7 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
   tmp_data.resize(column_sizes_.size());
   // read all children
   for (auto idx = 0; idx < node->header.count; idx++) {
-    OptimisticGuard<BTreeNode> child(buffer_, node->GetChild(idx));
+    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
     for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
       // row id
       u8 *tmpRowId = child.Ptr()->GetKey(entry_idx);

@@ -38,18 +38,18 @@ void TPCCWorkloadExtended<AdapterType>::Query2() {
   // Pick target region
   Integer target_region = UniformRand(0, 4);
   // Scan region
-  this->region.Scan({target_region}, [&](const RegionType::Key &r_key, const RegionType &r_rec) {
+  this->region.ScanOptimized({target_region}, {}, [&](const RegionType::Key &r_key, const RegionType &r_rec) {
     (void)r_rec;
     if (r_key.r_regionkey == target_region) {
       // found target region
       // Scan nation
-      this->nation.Scan({0}, [&](const NationType::Key &n_key, const NationType &n_rec) {
+      this->nation.ScanOptimized({0}, {1}, [&](const NationType::Key &n_key, const NationType &n_rec) {
         if (n_rec.n_regionkey != target_region) {
           // ignore nation with wrong region
           return true;
         }
         // Scan suppliers
-        this->supplier.Scan({0}, [&](const SupplierType::Key &su_key, const SupplierType &su_rec) {
+        this->supplier.ScanOptimized({0}, {2}, [&](const SupplierType::Key &su_key, const SupplierType &su_rec) {
           if (su_rec.su_nationkey != n_key.n_nationkey) {
             // ignore supplier from wrong nation
             return true;

@@ -40,7 +40,7 @@ class Adapter {
   virtual void ScanDesc(const typename RecordBase::Key &key,
                         const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) = 0;
   // -------------------------------------------------------------------------------------
-  virtual void ScanOptimized(const typename RecordBase::Key &key, std::vector<uint32_t> &column_idxs,
+  virtual void ScanOptimized(const typename RecordBase::Key &key, const std::vector<uint32_t> &column_idxs,
                              const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) = 0;
   // -------------------------------------------------------------------------------------
   virtual void Insert(const typename RecordBase::Key &key, const RecordBase &record) = 0;

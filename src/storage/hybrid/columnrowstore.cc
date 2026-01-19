@@ -165,7 +165,7 @@ void ColumnRowStore::ConvertHotDataToColdData() { hot_data.MoveHotDataToColdData
 /**
  * call with empty std::span<u8> as key to start from lowest row id
  */
-void ColumnRowStore::ScanOptimized(std::span<u8> key, std::vector<u32> &column_idxs, const AccessRecordFunc &fn) {
+void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &column_idxs, const AccessRecordFunc &fn) {
   // TODO
   // get row id
   u64 row_id = 0;

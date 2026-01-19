@@ -15,7 +15,7 @@ class HKVInterface : public KVInterface {
   virtual ~HKVInterface() = default;
 
   // -------------------------------------------------------------------------------------
-  virtual void ScanOptimized(std::span<u8> key, std::vector<u32> &column_idxs, const AccessRecordFunc &fn) = 0;
+  virtual void ScanOptimized(std::span<u8> key, const std::vector<u32> &column_idxs, const AccessRecordFunc &fn) = 0;
 };
 
 }  // namespace leanstore

@@ -44,8 +44,8 @@ auto BTreeNodeImpl<NodeHeader>::GetHead(u8 *key, leng_t key_len) -> std::array<u
 }
 
 template <class NodeHeader>
-auto BTreeNodeImpl<NodeHeader>::FindChild(std::span<u8> search_key, leng_t &pos,
-                                          const ComparisonLambda &cmp) -> pageid_t {
+auto BTreeNodeImpl<NodeHeader>::FindChild(std::span<u8> search_key, leng_t &pos, const ComparisonLambda &cmp)
+  -> pageid_t {
   pos = LowerBound(search_key, cmp);
   return (pos == header.count) ? header.right_most_child : GetChild(pos);
 }
@@ -245,8 +245,8 @@ void BTreeNodeImpl<NodeHeader>::SearchHint(const std::array<u8, 4> &key_head, le
 
 // -------------------------------------------------------------------------------------
 template <class NodeHeader>
-auto BTreeNodeImpl<NodeHeader>::LowerBound(std::span<u8> search_key, bool &exact_found,
-                                           const ComparisonLambda &cmp) -> leng_t {
+auto BTreeNodeImpl<NodeHeader>::LowerBound(std::span<u8> search_key, bool &exact_found, const ComparisonLambda &cmp)
+  -> leng_t {
   exact_found = false;
 
   int ret = 0;
@@ -519,7 +519,7 @@ auto BTreeNodeImpl<NodeHeader>::MergeNodes(leng_t left_slot_id, BTreeNodeImpl<No
     assert((right->header.is_leaf) && (parent->IsInner()));
     // calculate the upper bound on space used of the new node
     auto space_upper_bound =
-      sizeof(NodeHeader) +                                     // size of NodeHeader (i.e. metadata)
+      sizeof(NodeHeader) +                                          // size of NodeHeader (i.e. metadata)
       header.space_used + right->header.space_used +                // size of all keys + their payload
       (header.prefix_len - tmp.header.prefix_len) * header.count +  //  grow from prefix compression for left node
       (right->header.prefix_len - tmp.header.prefix_len) * right->header.count +  // same as above for right node
@@ -535,7 +535,7 @@ auto BTreeNodeImpl<NodeHeader>::MergeNodes(leng_t left_slot_id, BTreeNodeImpl<No
     // calculate the upper bound on space used of the new node
     auto extra_key_len = parent->header.prefix_len + parent->slots[left_slot_id].key_length;
     auto space_upper_bound =
-      sizeof(NodeHeader) +                                     // size of NodeHeader (i.e. metadata)
+      sizeof(NodeHeader) +                                          // size of NodeHeader (i.e. metadata)
       header.space_used + right->header.space_used +                // size of all keys + their payload
       (header.prefix_len - tmp.header.prefix_len) * header.count +  //  grow from prefix compression for left node
       (right->header.prefix_len - tmp.header.prefix_len) * right->header.count +  // same as above for right node

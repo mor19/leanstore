@@ -12,9 +12,9 @@ ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobMan
       blob_(blob_manager),
       next_row_id(0),
       row_id_index(buffer_pool, true),
-      hot_data(buffer_pool, append_bias),
-      cold_data(),
       columnSizes(columnSizes),
+      hot_data(buffer_pool, this, this->columnSizes, append_bias),
+      cold_data(),
       allColumnIndices(),
       row_id_to_key_index(buffer_pool, true) {
   // generate vector with all column indices
@@ -131,17 +131,16 @@ auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, F
     // key not in row id index = key not in column-row-store
     return false;
   }
-  // trigger func with old payload if exists
-  if (func) { this->hot_data.LookUp(U64ToSpanU8(row_id), func); }
   // update = insert (without updating the row id of key) + delete old + update row-id index
   u64 new_row_id = next_row_id.fetch_add(1);
   // apply fixed delta update to copy
   std::vector<u8> temp;
   this->hot_data.LookUp(U64ToSpanU8(row_id),
                         [&temp](std::span<u8> payload) { temp.assign(payload.begin(), payload.end()); });
-  // IGNORING DELTA
+  // apply func
+  func({temp.data(), temp.size()});
+  // IGNORING DELTA (because it is for delta logging)
   (void)delta;
-  // delta->UpdateDeltaPayload(temp);
   hot_data.Insert(U64ToSpanU8(new_row_id), temp);
   this->row_id_to_key_index.Insert(U64ToSpanU8(new_row_id), key);
   this->InternalRemove(row_id);
@@ -160,6 +159,8 @@ void ColumnRowStore::ScanDescending(std::span<u8> key, const AccessRecordFunc &f
   (void)fn;
   throw std::runtime_error("not implemented");
 }
+
+void ColumnRowStore::ConvertHotDataToColdData() { hot_data.MoveHotDataToColdData(); }
 
 /**
  * call with empty std::span<u8> as key to start from lowest row id
@@ -229,16 +230,23 @@ auto ColumnRowStore::CountEntries() -> u64 {
   return result;
 }
 
+/**
+ * count cold data entries
+ */
+auto ColumnRowStore::CountColdEntries() -> u64 {
+  auto result = 0;
+  for (ColumnChunk &chunk : this->cold_data) { result += chunk.count_active; }
+  return result;
+}
+
 auto ColumnRowStore::SizeInMB() -> float { return CountPages() * static_cast<float>(PAGE_SIZE) / MB; }
 
 auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
   -> bool {
-  // cmp not needed because of unique row id
-  (void)cmp;
   // get row id
   u64 row_id;
-  if (!row_id_index.LookUp({const_cast<u8 *>(blob_key.data()), blob_key.size()},
-                           [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); })) {
+  if (!row_id_index.LookUpBlob(blob_key, cmp,
+                               [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); })) {
     // key not in row id index = key not in column-row-store
     return false;
   }
@@ -343,13 +351,33 @@ auto ColumnRowStore::FindChunkInColdData(u64 row_id) -> ColumnChunk * {
   return &(*iterator);
 }
 
-void ColumnRowStore::MoveInternalNodeToColdData() {
-  // remove block from hot data
-  // TODO
-  // buffer data
-  // TODO
-  // write blobs
-  // TODO
+void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vector<u8>> &data) {
+  // append new column chunk
+  cold_data.emplace_back();
+  ColumnChunk &newColumnData = cold_data.back();
+  newColumnData.count        = rowIds.size() / sizeof(u64);
+  newColumnData.count_active = newColumnData.count;
+  // write min and max row id (first and last row id)
+  std::memcpy(&newColumnData.minRowId, rowIds.data(), sizeof(u64));
+  std::memcpy(&newColumnData.maxRowId, rowIds.data() + rowIds.size() - sizeof(u64), sizeof(u64));
+  // store rowId column
+  newColumnData.idx_column = blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false);
+  // store keys from rowIds and remove them
+  std::vector<u8> keys;
+  // get keys and remove
+  for (size_t i = 0; i + sizeof(u64) <= rowIds.size(); i += sizeof(u64)) {
+    std::span<u8> id(rowIds.data() + i, sizeof(u64));
+    row_id_to_key_index.LookUp(id, [&](std::span<u8> pl) { keys.insert(keys.end(), id.begin(), id.end()); });
+    row_id_to_key_index.Remove(id);
+  }
+  newColumnData.key_column     = blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false);
+  newColumnData.totalSizeBytes = rowIds.size() + keys.size();
+  // store columns
+  newColumnData.column_parts.resize(columnSizes.size());
+  for (std::vector<u8> &column : data) {
+    newColumnData.column_parts.emplace_back(blob_->AllocateBlob({column.data(), column.size()}, nullptr, false));
+    newColumnData.totalSizeBytes += column.size();
+  }
 }
 
 }  // namespace leanstore::storage

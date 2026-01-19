@@ -7,6 +7,7 @@
 #include "storage/page.h"
 #include "sync/hybrid_latch.h"
 
+#include <ctime>
 #include <span>
 #include <string>
 
@@ -110,12 +111,25 @@ struct BTreeNodeHeaderWithLatch : BTreeNodeHeader {
   explicit BTreeNodeHeaderWithLatch(bool is_leaf) : BTreeNodeHeader(is_leaf) {}
 };
 
+/**
+ * Similar to BTreeNodeHeader, but has a timestamp to track last access for hot/cold separation
+ */
+struct BTreeNodeHeaderWithTimestamp : BTreeNodeHeader {
+ public:
+  std::time_t timestamp;
+
+  explicit BTreeNodeHeaderWithTimestamp(bool is_leaf) : BTreeNodeHeader(is_leaf) {
+    if (is_leaf) { std::time(&timestamp); }
+  }
+};
+
 // -------------------------------------------------------------------------------------
 template <class NodeHeader>
 class alignas(PAGE_SIZE) BTreeNodeImpl : public PageHeader {
  public:
   static constexpr u32 MAX_RECORD_SIZE =
-    ((PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader) - (3 * sizeof(PageSlot)))) / 3; // minium of 3 key+value pairs per node
+    ((PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader) - (3 * sizeof(PageSlot)))) /
+    3;  // minium of 3 key+value pairs per node
 
   NodeHeader header;
   PageSlot slots[(PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader)) / sizeof(PageSlot)];
@@ -179,8 +193,8 @@ class alignas(PAGE_SIZE) BTreeNodeImpl : public PageHeader {
   auto FindSeparator(bool append_bias, const ComparisonLambda &cmp) -> SeparatorInfo;
   void SplitNode(BTreeNodeImpl *parent, BTreeNodeImpl *node_right, pageid_t left_pid, pageid_t right_pid,
                  leng_t separator_slot, std::span<u8> sep_key, const ComparisonLambda &cmp);
-  auto MergeNodes(leng_t left_slot_id, BTreeNodeImpl *parent, BTreeNodeImpl *right,
-                  const ComparisonLambda &cmp) -> bool;
+  auto MergeNodes(leng_t left_slot_id, BTreeNodeImpl *parent, BTreeNodeImpl *right, const ComparisonLambda &cmp)
+    -> bool;
 
   // BLOB custom LookUp operators
   auto FindChildWithBlobKey(const blob::BlobLookupKey &key, leng_t &pos, const ComparisonLambda &cmp) -> pageid_t;
@@ -190,8 +204,9 @@ class alignas(PAGE_SIZE) BTreeNodeImpl : public PageHeader {
   auto CommonPrefix(leng_t lhs_slot, leng_t rhs_slot) -> leng_t;
 };
 
-using BTreeNode         = BTreeNodeImpl<BTreeNodeHeader>;
-using InMemoryBTreeNode = BTreeNodeImpl<BTreeNodeHeaderWithLatch>;
+using BTreeNode              = BTreeNodeImpl<BTreeNodeHeader>;
+using BTreeNodeWithTimeStamp = BTreeNodeImpl<BTreeNodeHeaderWithTimestamp>;
+using InMemoryBTreeNode      = BTreeNodeImpl<BTreeNodeHeaderWithLatch>;
 
 static_assert(sizeof(BTreeNode) == PAGE_SIZE);
 static_assert(BTreeNode::MAX_RECORD_SIZE > 1.2 * KB);

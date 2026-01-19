@@ -121,11 +121,16 @@ void OptimisticGuard<PageClass>::ValidateOrRestart(bool auto_moved) {
 template class OptimisticGuard<storage::Page>;
 template class OptimisticGuard<storage::MetadataPage>;
 template class OptimisticGuard<storage::BTreeNode>;
+template class OptimisticGuard<storage::BTreeNodeWithTimeStamp>;
 
 // Optimistic Lock-Coupling facility
 template OptimisticGuard<storage::BTreeNode>::OptimisticGuard(buffer::BufferManager *, pageid_t,
                                                               OptimisticGuard<storage::MetadataPage> &);
 template OptimisticGuard<storage::BTreeNode>::OptimisticGuard(buffer::BufferManager *, pageid_t,
                                                               OptimisticGuard<storage::BTreeNode> &);
+template OptimisticGuard<storage::BTreeNodeWithTimeStamp>::OptimisticGuard(buffer::BufferManager *, pageid_t,
+                                                                           OptimisticGuard<storage::MetadataPage> &);
+template OptimisticGuard<storage::BTreeNodeWithTimeStamp>::OptimisticGuard(
+  buffer::BufferManager *, pageid_t, OptimisticGuard<storage::BTreeNodeWithTimeStamp> &);
 
 }  // namespace leanstore::sync

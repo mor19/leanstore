@@ -91,5 +91,6 @@ auto ExclusiveGuard<PageClass>::UnlockAndGetPtr() -> PageClass * {
 template class ExclusiveGuard<storage::Page>;
 template class ExclusiveGuard<storage::MetadataPage>;
 template class ExclusiveGuard<storage::BTreeNode>;
+template class ExclusiveGuard<storage::BTreeNodeWithTimeStamp>;
 
 }  // namespace leanstore::sync

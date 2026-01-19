@@ -6,7 +6,9 @@
 #include "fmt/ranges.h"
 #include "gtest/gtest.h"
 
+#include <chrono>
 #include <cstring>
+#include <thread>
 #include <unordered_map>
 
 namespace leanstore::storage {
@@ -56,6 +58,28 @@ class TestColumnRowStore : public BaseTest {
 TEST_F(TestColumnRowStore, InsertAndQuery) {
   std::vector<std::pair<int, __uint128_t>> data;
   Prepare<__uint128_t>(data, true);
+
+  for (auto &pair : data) {
+    std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
+    std::span payload{reinterpret_cast<u8 *>(&pair.second), sizeof(__uint128_t)};
+
+    auto found = columnrowstore_->LookUp(key, [&payload](std::span<u8> data) {
+      EXPECT_EQ(payload.size(), data.size());
+      for (size_t idx = 0; idx < data.size(); idx++) { EXPECT_EQ(payload[idx], data[idx]); }
+    });
+    ASSERT_TRUE(found);
+  }
+}
+
+TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
+  std::vector<std::pair<int, __uint128_t>> data;
+  Prepare<__uint128_t>(data, true);
+
+  std::this_thread::sleep_for(std::chrono::seconds(11));
+
+  columnrowstore_->ConvertHotDataToColdData();
+
+  ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
 
   for (auto &pair : data) {
     std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};

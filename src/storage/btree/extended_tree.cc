@@ -1,11 +1,13 @@
-#include "storage/btree/tree.h"
+#include "storage/btree/extended_tree.h"
 #include "common/constants.h"
 #include "common/exceptions.h"
 #include "common/utils.h"
 #include "leanstore/env.h"
 #include "storage/blob/blob_manager.h"
+#include "storage/hybrid/columnrowstore.h"
 
 #include <cstring>
+#include <ctime>
 #include <memory>
 #include <tuple>
 #include <vector>
@@ -27,13 +29,14 @@ using leanstore::sync::SharedGuard;
 
 namespace leanstore::storage {
 
-leng_t BTree::btree_slot_counter = 0;
+leng_t ExtendedBTree::btree_slot_counter = 0;
 
-BTree::BTree(buffer::BufferManager *buffer_pool, bool append_bias)
-    : buffer_(buffer_pool), append_bias_(append_bias) {
+ExtendedBTree::ExtendedBTree(buffer::BufferManager *buffer_pool, ColumnRowStore *column_row_store,
+                             std::vector<u32> &columnSizes, bool append_bias)
+    : buffer_(buffer_pool), column_row_store_(column_row_store), column_sizes_(columnSizes), append_bias_(append_bias) {
   ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
-  ExclusiveGuard<BTreeNode> root_page(buffer_, buffer_->AllocPage());
-  new (root_page.Ptr()) storage::BTreeNode(true);
+  ExclusiveGuard<BTreeNodeWithTimeStamp> root_page(buffer_, buffer_->AllocPage());
+  new (root_page.Ptr()) storage::BTreeNodeWithTimeStamp(true);
   metadata_slotid_                   = btree_slot_counter++;
   meta_page->roots[metadata_slotid_] = root_page.PageID();
   // -------------------------------------------------------------------------------------
@@ -41,37 +44,39 @@ BTree::BTree(buffer::BufferManager *buffer_pool, bool append_bias)
   root_page.AdvanceGSN();
 }
 
-void BTree::ToggleAppendBiasMode(bool append_bias) { append_bias_ = append_bias; }
+void ExtendedBTree::ToggleAppendBiasMode(bool append_bias) { append_bias_ = append_bias; }
 
-void BTree::SetComparisonOperator(ComparisonLambda cmp_op) { cmp_lambda_ = cmp_op; }
+void ExtendedBTree::SetComparisonOperator(ComparisonLambda cmp_op) { cmp_lambda_ = cmp_op; }
 
-auto BTree::IterateAllNodes(OptimisticGuard<BTreeNode> &node, const std::function<u64(BTreeNode &)> &inner_fn,
-                            const std::function<u64(BTreeNode &)> &leaf_fn) -> u64 {
+auto ExtendedBTree::IterateAllNodes(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
+                                    const std::function<u64(BTreeNodeWithTimeStamp &)> &inner_fn,
+                                    const std::function<u64(BTreeNodeWithTimeStamp &)> &leaf_fn) -> u64 {
   if (!node->IsInner()) { return leaf_fn(*(node.Ptr())); }
 
   u64 res = inner_fn(*(node.Ptr()));
   for (auto idx = 0; idx < node->header.count; idx++) {
-    OptimisticGuard<BTreeNode> child(buffer_, node->GetChild(idx));
+    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
     res += IterateAllNodes(child, inner_fn, leaf_fn);
   }
-  OptimisticGuard<BTreeNode> child(buffer_, node->header.right_most_child);
+  OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
   res += IterateAllNodes(child, inner_fn, leaf_fn);
   return res;
 }
 
-auto BTree::IterateUntils(OptimisticGuard<BTreeNode> &node, const std::function<bool(BTreeNode &)> &inner_fn,
-                          const std::function<bool(BTreeNode &)> &leaf_fn) -> bool {
+auto ExtendedBTree::IterateUntils(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
+                                  const std::function<bool(BTreeNodeWithTimeStamp &)> &inner_fn,
+                                  const std::function<bool(BTreeNodeWithTimeStamp &)> &leaf_fn) -> bool {
   if (!node->IsInner()) { return leaf_fn(*(node.Ptr())); }
 
   auto res = inner_fn(*(node.Ptr()));
   if (!res) {
     for (auto idx = 0; idx < node->header.count; idx++) {
-      OptimisticGuard<BTreeNode> child(buffer_, node->GetChild(idx));
+      OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
       res |= IterateAllNodes(child, inner_fn, leaf_fn);
       if (res) { break; }
     }
     if (!res) {
-      OptimisticGuard<BTreeNode> child(buffer_, node->header.right_most_child);
+      OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
       res |= IterateAllNodes(child, inner_fn, leaf_fn);
     }
   }
@@ -80,34 +85,39 @@ auto BTree::IterateUntils(OptimisticGuard<BTreeNode> &node, const std::function<
 }
 
 // -------------------------------------------------------------------------------------
-auto BTree::FindLeafOptimistic(std::span<u8> key) -> OptimisticGuard<BTreeNode> {
+auto ExtendedBTree::FindLeafOptimistic(std::span<u8> key) -> OptimisticGuard<BTreeNodeWithTimeStamp> {
   OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
 
-  while (node->IsInner()) { node = OptimisticGuard<BTreeNode>(buffer_, node->FindChild(key, cmp_lambda_), node); }
+  while (node->IsInner()) {
+    node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, node->FindChild(key, cmp_lambda_), node);
+  }
   return node;
 }
 
-auto BTree::FindLeafShared(std::span<u8> key) -> SharedGuard<BTreeNode> {
+auto ExtendedBTree::FindLeafShared(std::span<u8> key) -> SharedGuard<BTreeNodeWithTimeStamp> {
   while (true) {
     try {
       OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
 
-      while (node->IsInner()) { node = OptimisticGuard<BTreeNode>(buffer_, node->FindChild(key, cmp_lambda_), node); }
+      while (node->IsInner()) {
+        node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, node->FindChild(key, cmp_lambda_), node);
+      }
 
-      return SharedGuard<BTreeNode>(std::move(node));
+      return SharedGuard<BTreeNodeWithTimeStamp>(std::move(node));
     } catch (const sync::RestartException &) {}
   }
 }
 
-void BTree::TrySplit(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNode> &&node) {
+void ExtendedBTree::TrySplit(ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
+                             ExclusiveGuard<BTreeNodeWithTimeStamp> &&node) {
   // create new root if necessary
   if (parent.PageID() == METADATA_PAGE_ID) {
     auto meta_p = reinterpret_cast<MetadataPage *>(parent.Ptr());
     // Root node is full, alloc a new root
-    ExclusiveGuard<BTreeNode> new_root(buffer_, buffer_->AllocPage());
-    new (new_root.Ptr()) storage::BTreeNode(false);
+    ExclusiveGuard<BTreeNodeWithTimeStamp> new_root(buffer_, buffer_->AllocPage());
+    new (new_root.Ptr()) storage::BTreeNodeWithTimeStamp(false);
     new_root->header.right_most_child = node.PageID();
     if (FLAGS_wal_enable) {
       new_root.PrepareWalEntry<WALNewRoot>(0);
@@ -127,8 +137,9 @@ void BTree::TrySplit(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNod
 
   if (parent->HasSpaceForKV(sep_info.len, sizeof(pageid_t))) {
     // alloc a new child page
-    ExclusiveGuard<BTreeNode> new_child(buffer_, buffer_->AllocPage());
-    new (new_child.Ptr()) storage::BTreeNode(!node->IsInner());
+    ExclusiveGuard<BTreeNodeWithTimeStamp> new_child(buffer_, buffer_->AllocPage());
+    new (new_child.Ptr()) storage::BTreeNodeWithTimeStamp(!node->IsInner());
+    // time update not needed because it is automatically done in the constructor if this is a leaf
     // now split the node
     node->SplitNode(parent.Ptr(), new_child.Ptr(), node.PageID(), new_child.PageID(), sep_info.slot,
                     {sep_key, sep_info.len}, cmp_lambda_);
@@ -154,17 +165,17 @@ void BTree::TrySplit(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNod
   EnsureSpaceForSplit(parent.UnlockAndGetPtr(), {sep_key, sep_info.len});
 }
 
-void BTree::EnsureSpaceForSplit(BTreeNode *to_split, std::span<u8> key) {
+void ExtendedBTree::EnsureSpaceForSplit(BTreeNodeWithTimeStamp *to_split, std::span<u8> key) {
   assert(to_split->IsInner());
   while (true) {
     try {
-      OptimisticGuard<BTreeNode> parent(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(
+      OptimisticGuard<BTreeNodeWithTimeStamp> parent(buffer_, METADATA_PAGE_ID);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(
         buffer_, reinterpret_cast<MetadataPage *>(parent.Ptr())->GetRoot(metadata_slotid_), parent);
 
       while (node->IsInner() && (node.Ptr() != to_split)) {
         parent = std::move(node);
-        node   = OptimisticGuard<BTreeNode>(buffer_, parent->FindChild(key, cmp_lambda_), parent);
+        node   = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, parent->FindChild(key, cmp_lambda_), parent);
       }
 
       if (node.Ptr() == to_split) {
@@ -173,8 +184,8 @@ void BTree::EnsureSpaceForSplit(BTreeNode *to_split, std::span<u8> key) {
           return;
         }
 
-        ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
-        ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
         TrySplit(std::move(parent_locked), std::move(node_locked));
       }
 
@@ -184,8 +195,9 @@ void BTree::EnsureSpaceForSplit(BTreeNode *to_split, std::span<u8> key) {
   }
 }
 
-void BTree::TryMerge(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNode> &&left,
-                     ExclusiveGuard<BTreeNode> &&right, leng_t left_pos) {
+void ExtendedBTree::TryMerge(ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
+                             ExclusiveGuard<BTreeNodeWithTimeStamp> &&left,
+                             ExclusiveGuard<BTreeNodeWithTimeStamp> &&right, leng_t left_pos) {
   if (left->MergeNodes(left_pos, parent.Ptr(), right.Ptr(), cmp_lambda_)) {
     // TODO(XXX): Free page left.PageID()
     if (FLAGS_wal_enable) {
@@ -204,7 +216,7 @@ void BTree::TryMerge(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNod
   }
 }
 
-void BTree::EnsureUnderfullInnersForMerge(BTreeNode *to_merge) {
+void ExtendedBTree::EnsureUnderfullInnersForMerge(BTreeNodeWithTimeStamp *to_merge) {
   assert(to_merge->IsInner());
   auto rep_key = to_merge->GetUpperFence();
   while (true) {
@@ -212,14 +224,15 @@ void BTree::EnsureUnderfullInnersForMerge(BTreeNode *to_merge) {
       // TODO(XXX): Implement tree-level compression
       //  i.e. parent of parent is page 0 (i.e. metadata page)
       //  and we can compress the inner nodes
-      OptimisticGuard<BTreeNode> parent(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(
+      OptimisticGuard<BTreeNodeWithTimeStamp> parent(buffer_, METADATA_PAGE_ID);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(
         buffer_, reinterpret_cast<MetadataPage *>(parent.Ptr())->GetRoot(metadata_slotid_), parent);
 
       leng_t node_pos = 0;
       while (node->IsInner() && (node.Ptr() != to_merge)) {
         parent = std::move(node);
-        node   = OptimisticGuard<BTreeNode>(buffer_, parent->FindChild(rep_key, node_pos, cmp_lambda_), parent);
+        node =
+          OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, parent->FindChild(rep_key, node_pos, cmp_lambda_), parent);
       }
 
       if (parent.PageID() != METADATA_PAGE_ID &&  // Root node can't be merged
@@ -231,11 +244,11 @@ void BTree::EnsureUnderfullInnersForMerge(BTreeNode *to_merge) {
         // underfull
         auto right_pid =
           (node_pos < parent->header.count - 1) ? parent->GetChild(node_pos + 1) : parent->header.right_most_child;
-        OptimisticGuard<BTreeNode> right(buffer_, right_pid, parent);
+        OptimisticGuard<BTreeNodeWithTimeStamp> right(buffer_, right_pid, parent);
         if (right->FreeSpaceAfterCompaction() >= (PAGE_SIZE - BTreeNodeHeader::SIZE_UNDER_FULL)) {
-          ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
-          ExclusiveGuard<BTreeNode> node_locked(std::move(node));
-          ExclusiveGuard<BTreeNode> right_locked(std::move(right));
+          ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+          ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
+          ExclusiveGuard<BTreeNodeWithTimeStamp> right_locked(std::move(right));
           TryMerge(std::move(parent_locked), std::move(node_locked), std::move(right_locked), node_pos);
         }
       }
@@ -245,10 +258,10 @@ void BTree::EnsureUnderfullInnersForMerge(BTreeNode *to_merge) {
   }
 }
 
-auto BTree::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bool {
+auto ExtendedBTree::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bool {
   while (true) {
     try {
-      OptimisticGuard<BTreeNode> node = FindLeafOptimistic(key);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node = FindLeafOptimistic(key);
       bool found;
       leng_t pos = node->LowerBound(key, found, cmp_lambda_);
       if (!found) { return false; }
@@ -260,30 +273,32 @@ auto BTree::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bool {
   }
 }
 
-void BTree::Insert(std::span<u8> key, std::span<const u8> payload) {
-  assert((key.size() + payload.size()) <= BTreeNode::MAX_RECORD_SIZE);
+void ExtendedBTree::Insert(std::span<u8> key, std::span<const u8> payload) {
+  assert((key.size() + payload.size()) <= BTreeNodeWithTimeStamp::MAX_RECORD_SIZE);
 
   while (true) {
     try {
-      OptimisticGuard<BTreeNode> parent(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(
+      OptimisticGuard<BTreeNodeWithTimeStamp> parent(buffer_, METADATA_PAGE_ID);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(
         buffer_, reinterpret_cast<MetadataPage *>(parent.Ptr())->GetRoot(metadata_slotid_), parent);
 
       while (node->IsInner()) {
         parent = std::move(node);
-        node   = OptimisticGuard<BTreeNode>(buffer_, parent->FindChild(key, cmp_lambda_), parent);
+        node   = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, parent->FindChild(key, cmp_lambda_), parent);
       }
 
       // Found the leaf node to insert new data
       if (node->HasSpaceForKV(key.size(), payload.size())) {
         /* Alternative WAL cycle - automatically append WAL entry when the scope ends */
-        auto defer_log = DeferLog<BTreeNode>();
+        auto defer_log = DeferLog<BTreeNodeWithTimeStamp>();
 
         /* Leaf node has enough space -> only latch leaf node */
         {
-          ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+          ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
           parent.ValidateOrRestart();
           node_locked->InsertKeyValue(key, payload, cmp_lambda_);
+          // update time
+          std::time(&node_locked->header.timestamp);
 
           /* Generate the log entry */
           if (FLAGS_wal_enable) { defer_log.Construct<WALInsert>(node_locked, key, payload); }
@@ -293,8 +308,8 @@ void BTree::Insert(std::span<u8> key, std::span<const u8> payload) {
       }
 
       // The leaf node doesn't have enough space, we have to split it
-      ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
-      ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+      ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+      ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
       TrySplit(std::move(parent_locked), std::move(node_locked));
 
       // We haven't run the insertion yet, so we run the loop again to insert the record
@@ -302,17 +317,17 @@ void BTree::Insert(std::span<u8> key, std::span<const u8> payload) {
   }
 }
 
-auto BTree::Remove(std::span<u8> key) -> bool {
+auto ExtendedBTree::Remove(std::span<u8> key) -> bool {
   while (true) {
     try {
-      OptimisticGuard<BTreeNode> parent(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(
+      OptimisticGuard<BTreeNodeWithTimeStamp> parent(buffer_, METADATA_PAGE_ID);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(
         buffer_, reinterpret_cast<MetadataPage *>(parent.Ptr())->GetRoot(metadata_slotid_), parent);
 
       leng_t node_pos = 0;
       while (node->IsInner()) {
         parent = std::move(node);
-        node   = OptimisticGuard<BTreeNode>(buffer_, parent->FindChild(key, node_pos, cmp_lambda_), parent);
+        node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, parent->FindChild(key, node_pos, cmp_lambda_), parent);
       }
 
       bool found;
@@ -328,9 +343,9 @@ auto BTree::Remove(std::span<u8> key) -> bool {
           ((node_pos + 1) < parent->header.count)   // current node has a right sibling
       ) {
         // underfull
-        ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
-        ExclusiveGuard<BTreeNode> node_locked(std::move(node));
-        ExclusiveGuard<BTreeNode> right_locked(buffer_, parent_locked->GetChild(node_pos + 1));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> right_locked(buffer_, parent_locked->GetChild(node_pos + 1));
         node_locked->RemoveSlot(slot_id);
         // --------------------------------------------------------------------------
         // WAL Remove
@@ -341,7 +356,7 @@ auto BTree::Remove(std::span<u8> key) -> bool {
           TryMerge(std::move(parent_locked), std::move(node_locked), std::move(right_locked), node_pos);
         }
       } else {
-        ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
         parent.ValidateOrRestart();
         node_locked->RemoveSlot(slot_id);
         // --------------------------------------------------------------------------
@@ -360,18 +375,18 @@ auto BTree::Remove(std::span<u8> key) -> bool {
  *
  * If `func` is provided, then func(previous payload) is triggered
  */
-auto BTree::Update(std::span<u8> key, std::span<const u8> payload, const PayloadFunc &func) -> bool {
-  assert((key.size() + payload.size()) <= BTreeNode::MAX_RECORD_SIZE);
+auto ExtendedBTree::Update(std::span<u8> key, std::span<const u8> payload, const PayloadFunc &func) -> bool {
+  assert((key.size() + payload.size()) <= BTreeNodeWithTimeStamp::MAX_RECORD_SIZE);
 
   while (true) {
     try {
-      OptimisticGuard<BTreeNode> parent(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(
+      OptimisticGuard<BTreeNodeWithTimeStamp> parent(buffer_, METADATA_PAGE_ID);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(
         buffer_, reinterpret_cast<MetadataPage *>(parent.Ptr())->GetRoot(metadata_slotid_), parent);
 
       while (node->IsInner()) {
         parent = std::move(node);
-        node   = OptimisticGuard<BTreeNode>(buffer_, parent->FindChild(key, cmp_lambda_), parent);
+        node   = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, parent->FindChild(key, cmp_lambda_), parent);
       }
 
       bool found;
@@ -383,7 +398,7 @@ auto BTree::Update(std::span<u8> key, std::span<const u8> payload, const Payload
       if (payload.size() <= curr_payload.size() ||
           node->HasSpaceForKV(key.size(), payload.size() - curr_payload.size())) {
         // only lock leaf
-        ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
         parent.ValidateOrRestart();
 
         // Log previos payload, trigger func utility if provided, and remove the entry
@@ -393,14 +408,17 @@ auto BTree::Update(std::span<u8> key, std::span<const u8> payload, const Payload
 
         // Insert new payload and add log entry
         node_locked->InsertKeyValue(key, payload, cmp_lambda_);
+        // would require time update, but the update method should not be used in the hot data to improve time ordered
+        // location
+
         if (FLAGS_wal_enable) { WAL_RECORD(node_locked, WALInsert, key, payload); }
         // --------------------------------------------------------------------------
         return true;  // success
       }
 
       // The leaf node doesn't have enough space, we have to split it
-      ExclusiveGuard<BTreeNode> parent_locked(std::move(parent));
-      ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+      ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+      ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
       TrySplit(std::move(parent_locked), std::move(node_locked));
 
       // We haven't run the insertion yet, so we run the loop again to insert the record
@@ -408,7 +426,7 @@ auto BTree::Update(std::span<u8> key, std::span<const u8> payload, const Payload
   }
 }
 
-auto BTree::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool {
+auto ExtendedBTree::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool {
   while (true) {
     try {
       auto node = FindLeafOptimistic(key);
@@ -417,10 +435,10 @@ auto BTree::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeD
       if (!found) { return false; }
 
       /* Alternative WAL cycle - automatically append WAL entry when the scope ends */
-      auto defer_log = DeferLog<BTreeNode>();
+      auto defer_log = DeferLog<BTreeNodeWithTimeStamp>();
 
       {
-        ExclusiveGuard<BTreeNode> node_locked(std::move(node));
+        ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
 
         /* Retrieve previous payload for delta record */
         auto record = node_locked->GetPayload(pos);
@@ -428,6 +446,8 @@ auto BTree::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeD
 
         /* Modify the record */
         func(record);
+        // would require time update, but the update method should not be used in the hot data to improve time ordered
+        // location
 
         /* Generate the delta record */
         if (FLAGS_wal_enable) {
@@ -445,7 +465,7 @@ auto BTree::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeD
   }
 }
 
-void BTree::ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) {
+void ExtendedBTree::ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) {
   auto node = FindLeafShared(key);
   bool unused;
   auto pos = node->LowerBound(key, unused, cmp_lambda_);
@@ -456,12 +476,12 @@ void BTree::ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) {
     } else {
       if (!node->header.HasRightNeighbor()) { return; }
       pos  = 0;
-      node = SharedGuard<BTreeNode>(buffer_, node->header.next_leaf_node);
+      node = SharedGuard<BTreeNodeWithTimeStamp>(buffer_, node->header.next_leaf_node);
     }
   }
 }
 
-void BTree::ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) {
+void ExtendedBTree::ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) {
   auto node = FindLeafShared(key);
   bool found;
   int pos = static_cast<int>(node->LowerBound(key, found, cmp_lambda_));
@@ -483,38 +503,40 @@ void BTree::ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) {
   }
 }
 
-auto BTree::CountEntries() -> u64 {
+auto ExtendedBTree::CountEntries() -> u64 {
   OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
 
-  return IterateAllNodes(node, [](BTreeNode &) { return 0; }, [](BTreeNode &node) { return node.header.count; });
+  return IterateAllNodes(
+    node, [](BTreeNodeWithTimeStamp &) { return 0; }, [](BTreeNodeWithTimeStamp &node) { return node.header.count; });
 }
-
 
 // -------------------------------------------------------------------------------------
 
-auto BTree::IsNotEmpty() -> bool {
+auto ExtendedBTree::IsNotEmpty() -> bool {
   OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
 
   return IterateUntils(
-    node, [](BTreeNode &) { return false; }, [](BTreeNode &node) { return (node.header.count > 0); });
+    node, [](BTreeNodeWithTimeStamp &) { return false; },
+    [](BTreeNodeWithTimeStamp &node) { return (node.header.count > 0); });
 }
 
-auto BTree::CountPages() -> u64 {
+auto ExtendedBTree::CountPages() -> u64 {
   OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
 
-  return IterateAllNodes(node, [](BTreeNode &) { return 1; }, [](BTreeNode &) { return 1; });
+  return IterateAllNodes(node, [](BTreeNodeWithTimeStamp &) { return 1; }, [](BTreeNodeWithTimeStamp &) { return 1; });
 }
 
-auto BTree::SizeInMB() -> float { return CountPages() * static_cast<float>(PAGE_SIZE) / MB; }
+auto ExtendedBTree::SizeInMB() -> float { return CountPages() * static_cast<float>(PAGE_SIZE) / MB; }
 
 /**
  * @brief Only used for Blob Handler indexes.
  * Similar to LookUp operator, but for Byte String as key
  */
-auto BTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb) -> bool {
+auto ExtendedBTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
+  -> bool {
   Ensure(cmp_lambda_.op == ComparisonOperator::BLOB_HANDLER);
   Ensure(cmp.op == ComparisonOperator::BLOB_LOOKUP);
   leng_t unused;
@@ -523,9 +545,10 @@ auto BTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp
   while (true) {
     try {
       OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNode> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
       while (node->IsInner()) {
-        node = OptimisticGuard<BTreeNode>(buffer_, node->FindChildWithBlobKey(search_key, unused, cmp), node);
+        node =
+          OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, node->FindChildWithBlobKey(search_key, unused, cmp), node);
       }
 
       bool found;
@@ -536,6 +559,121 @@ auto BTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp
       read_cb(payload);
       return true;
     } catch (const sync::RestartException &) {}
+  }
+}
+
+void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
+                                    sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&node) {
+  assert(parent->IsInner());
+  assert(node->IsInner());
+
+  // root node children can not be removed
+  if (parent.PageID() == METADATA_PAGE_ID) { return; }
+
+  if (parent->header.right_most_child == node.PageID()) {
+    // remove rightmost child by overwriting with second last child ptr
+    parent->header.right_most_child = parent->GetChild(parent->header.count - 1);
+    parent->RemoveSlot(parent->header.count - 1);
+  } else {
+    // find pos and remove slot
+    for (leng_t pos = 0; pos < parent->header.count; pos++) {
+      if (parent->GetChild(pos) == node.PageID()) {
+        parent->RemoveSlot(pos);
+        break;
+      }
+    }
+  }
+
+  // check if parent is underfull -> merge upwards
+  if (parent->FreeSpaceAfterCompaction() >= BTreeNodeHeader::SIZE_UNDER_FULL) {
+    EnsureUnderfullInnersForMerge(parent.UnlockAndGetPtr());
+  }
+
+  // store cold data
+  std::vector<u8> tmp_row_ids;
+  std::vector<std::vector<u8>> tmp_data;
+  tmp_data.resize(column_sizes_.size());
+  // read all children
+  for (auto idx = 0; idx < node->header.count; idx++) {
+    OptimisticGuard<BTreeNode> child(buffer_, node->GetChild(idx));
+    for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
+      // row id
+      u8 *tmpRowId = child.Ptr()->GetKey(entry_idx);
+      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowId, tmpRowId + sizeof(u64));
+      // payload
+      u8 *payloadData     = child.Ptr()->GetPayload(entry_idx).data();
+      size_t recordOffset = 0;
+      // split payload into column values
+      for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+        const u32 size = column_sizes_[col_idx];
+        tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+                                 payloadData + recordOffset + size);
+      }
+    }
+  }
+  // store cold data
+  column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
+  // free removed nodes
+  // TODO
+
+  node.Unlock();
+}
+
+void ExtendedBTree::MoveHotDataToColdData() {
+  while (true) {
+    try {
+      // make sure at least root and its children are inner nodes
+      OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
+      OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_), meta);
+      if (!root->IsInner() || root->header.count == 0) { return; }
+      time_t current_time;
+      std::time(&current_time);
+      for (leng_t i = 0; i < root->header.count; i++) {
+        OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, root->GetChild(i));
+        if (!child->IsInner()) { return; }
+        // start iterating from root
+        IterateLeafParents(child, root, current_time);
+      }
+      return;
+    } catch (const sync::RestartException &) {}
+  }
+}
+
+void ExtendedBTree::IterateLeafParents(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
+                                       OptimisticGuard<BTreeNodeWithTimeStamp> &parent, time_t current_time) {
+  if (!node->IsInner()) return;
+
+  for (leng_t i = 0; i < node->header.count; i++) {
+    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
+
+    if (!child->IsInner()) {
+      // leaf parent -> check time in rightmost child node
+      ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+      ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
+      OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+      if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
+        // data is expired -> move to cold data
+        RemoveInnerNode(std::move(parent_locked), std::move(node_locked));
+      }
+      return;
+    } else {
+      IterateLeafParents(child, node, current_time);
+    }
+  }
+
+  // rightmost child
+  OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
+  if (!child->IsInner()) {
+    // leaf parent -> check time
+    ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
+    ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
+    OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+    if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
+      // data is expired -> move to cold data
+      RemoveInnerNode(std::move(parent_locked), std::move(node_locked));
+    }
+  } else {
+    IterateLeafParents(child, node, current_time);
   }
 }
 

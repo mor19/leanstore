@@ -80,3 +80,6 @@ DEFINE_uint64(blob_buffer_pool_gb, 0,
               "Whether to use tier buffer manager or a fixed virtual memory range for BLOB allocation"
               "0. Use tier buffer manager for extent allocation"
               "> 0. Fixed virtual memory range of FLAGS_blob_buffer_size_gb GBs");
+// -----------------------------------------------------------------------------------
+/* Hot/Cold separation */
+DEFINE_uint32(htap_expire_seconds, 10, "Seconds to wait before moving hot data into cold data (before hot data expires into cold data)");

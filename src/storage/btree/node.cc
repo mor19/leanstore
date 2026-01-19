@@ -615,6 +615,7 @@ auto BTreeNodeImpl<NodeHeader>::LowerBoundWithBlobKey(const blob::BlobLookupKey 
   return lower;
 }
 
+template class BTreeNodeImpl<BTreeNodeHeaderWithTimestamp>;
 template class BTreeNodeImpl<BTreeNodeHeader>;
 template class BTreeNodeImpl<BTreeNodeHeaderWithLatch>;
 

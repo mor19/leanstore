@@ -4,6 +4,7 @@
 #include "common/typedefs.h"
 #include "leanstore/hkv_interface.h"
 #include "storage/blob/blob_manager.h"
+#include "storage/btree/extended_tree.h"
 #include "storage/btree/node.h"
 #include "storage/btree/tree.h"
 #include "storage/btree/wal.h"
@@ -46,28 +47,31 @@ class ColumnRowStore : public HKVInterface {
   auto SizeInMB() -> float override;
   auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
     -> bool override;
+  void ConvertHotDataToColdData();
+  auto CountColdEntries() -> u64;
 
   // -------------------------------------------------------------------------------------
   /* APIs for use within LeanStore */
   auto IsNotEmpty() -> bool;
   auto CountPages() -> u64;
+  void StoreColdData(std::vector<u8> &rowIds, std::vector<std::vector<u8>> &data);
 
  private:
   // TODO
   bool InternalRemove(u64 row_id);
   ColumnChunk *FindChunkInColdData(u64 row_id);
-  void MoveInternalNodeToColdData();
 
   /* Core properties */
   buffer::BufferManager *buffer_;
   blob::BlobManager *blob_;
   std::atomic<u64> next_row_id;
   storage::BTree row_id_index;
-  storage::BTree hot_data;
-  std::vector<ColumnChunk> cold_data;
   std::vector<u32> columnSizes;
+  storage::ExtendedBTree hot_data;
+  std::vector<ColumnChunk> cold_data;
   std::vector<u32> allColumnIndices;  // contains all column indices
-  storage::BTree row_id_to_key_index; // reverse row id to key index (for cold data, this could/should be stored as extra blob)
+  storage::BTree
+    row_id_to_key_index;  // reverse row id to key index (for cold data, this is stored as extra blob)
 };
 
 }  // namespace leanstore::storage

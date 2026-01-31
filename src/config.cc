@@ -13,11 +13,11 @@ DEFINE_bool(worker_pin_thread, false, "Pin worker to a specific thread");
 DEFINE_uint32(txn_rate, 0, "Limit transaction rate in second for latency checking -- Disabled by default");
 // -----------------------------------------------------------------------------------
 /* Buffer manager */
-DEFINE_uint64(bm_virtual_gb, 4, "Size of virtual memory in GB");
-DEFINE_uint64(bm_physical_gb, 1, "Size of physical memory in GB");
-DEFINE_uint64(bm_alias_block_mb, 1024, "Size of worker-local aliasing area in MB");
-DEFINE_uint64(bm_evict_batch_size, 64, "Expected number of pages to be evicted during each eviction");
-DEFINE_uint32(bm_aio_qd, 64, "Maximum number of concurrent I/O processed by bm's io_uring");
+DEFINE_uint64(bm_virtual_gb, 16, "Size of virtual memory in GB"); // default 1
+DEFINE_uint64(bm_physical_gb, 4, "Size of physical memory in GB"); // default 4
+DEFINE_uint64(bm_alias_block_mb, 4096, "Size of worker-local aliasing area in MB"); // default 1024
+DEFINE_uint64(bm_evict_batch_size, 256, "Expected number of pages to be evicted during each eviction"); // default 64
+DEFINE_uint32(bm_aio_qd, 256, "Maximum number of concurrent I/O processed by bm's io_uring"); // default 64
 DEFINE_bool(bm_enable_fair_eviction, true,
             "Whether to use fair extent eviction policy or not"
             "Fair eviction policy: Large extents are more likely to be evicted than small extents/pages");
@@ -36,7 +36,7 @@ DEFINE_uint32(wal_batch_write_kb, 16,
 DEFINE_uint32(wal_max_idle_time_us, 50,
               "Only used when FLAGS_txn_commit_variant in [WORKERS_WRITE_LOG, WILO_STEAL]"
               "Force write when the avg idle time (from sampling) is larger than this number");
-DEFINE_uint32(wal_stealing_group_size, 8,
+DEFINE_uint32(wal_stealing_group_size, 1,
               "Only used when FLAGS_txn_commit_variant == WILO_STEAL"
               "The size (number of workers) of the commit group, in which workers of the same group can:"
               "- Steal log entries from other peers in the same group");
@@ -56,7 +56,7 @@ DEFINE_int32(txn_commit_variant, static_cast<int>(leanstore::transaction::Commit
              "See class leanstore::transaction::CommitProtocol for your information");
 
 /* Configuration for commit protocols */
-DEFINE_uint32(txn_commit_group_size, 2,
+DEFINE_uint32(txn_commit_group_size, 1,
               "Only used when FLAGS_txn_commit_variant == WILO_STEAL"
               "The size (number of workers) of the commit group, in which workers of the same group can:"
               "- Workers in the same group trigger commit for the whole group directly");

@@ -32,10 +32,10 @@ namespace leanstore {
 
 class BaseTest : public ::testing::Test {
  public:
-  static constexpr u64 N_PAGES      = 2048;
-  static constexpr u64 EXTRA_NO_PG  = 16;
-  static constexpr u64 PHYSICAL_CAP = 1024;
-  static constexpr u64 EVICT_SIZE   = 8;  // should be <= FLAGS_bm_aio_qd defined in main.cc
+  static constexpr u64 N_PAGES      = 2048 * 4; // default 2048
+  static constexpr u64 EXTRA_NO_PG  = 16; // default 16
+  static constexpr u64 PHYSICAL_CAP = N_PAGES/2; // default 1024
+  static constexpr u64 EVICT_SIZE   = 8;  // should be <= FLAGS_bm_aio_qd defined in main.cc  // default 8
 
  protected:
   // Env

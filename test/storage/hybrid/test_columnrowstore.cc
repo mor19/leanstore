@@ -30,14 +30,15 @@ class TestColumnRowStore : public BaseTest {
   }
 
   template <typename value_t>
-  void Prepare(std::vector<std::pair<int, value_t>> &data, bool get_permutation = false, bool prefill_tree = true) {
+  void Prepare(std::vector<std::pair<int, value_t>> &data, bool get_permutation = false, bool prefill_tree = true,
+               u32 recordsNO = NO_RECORDS) {
     columnrowstore_ =
       std::make_unique<ColumnRowStore>(buffer_.get(), blob_.get(), std::vector<uint32_t>{sizeof(value_t)});
-    for (size_t idx = 0; idx < NO_RECORDS; idx++) {
+    for (size_t idx = 0; idx < recordsNO; idx++) {
       data.emplace_back(static_cast<int>(__builtin_bswap32(idx + 1)), static_cast<value_t>(idx * 100));
     }
     if (get_permutation) {
-      for (size_t idx = 0; idx < rand() % NO_RECORDS + NO_RECORDS / 2; idx++) {
+      for (size_t idx = 0; idx < rand() % recordsNO + recordsNO / 2; idx++) {
         std::next_permutation(data.begin(), data.end());
       }
     }
@@ -47,8 +48,6 @@ class TestColumnRowStore : public BaseTest {
         std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
         std::span payload{reinterpret_cast<u8 *>(&pair.second), sizeof(value_t)};
         columnrowstore_->Insert(key, payload);
-        WarningMessage(std::format("inserted {}", pair.first));
-        // TOOD only 5300 can be inserted? (memory problem? max size for transaction/buffer?)
       }
       Ensure(columnrowstore_->IsNotEmpty());
     }
@@ -73,7 +72,7 @@ TEST_F(TestColumnRowStore, InsertAndQuery) {
 
 TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
   std::vector<std::pair<int, __uint128_t>> data;
-  Prepare<__uint128_t>(data, true);
+  Prepare<__uint128_t>(data, true, true, NO_RECORDS * 2);
 
   std::this_thread::sleep_for(std::chrono::seconds(11));
 

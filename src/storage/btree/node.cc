@@ -67,7 +67,6 @@ auto BTreeNodeImpl<NodeHeader>::CommonPrefix(leng_t lhs_slot, leng_t rhs_slot) -
   u8 *rhs_key  = GetKey(rhs_slot);
   leng_t idx;
   for (idx = 0; idx < limit; idx++) {
-    // TODO rhs segfaults
     if (lhs_key[idx] != rhs_key[idx]) { break; }
   }
   return idx;

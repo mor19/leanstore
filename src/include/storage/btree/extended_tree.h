@@ -24,7 +24,6 @@ class ColumnRowStore;
 
 class ExtendedBTree : public KVInterface {
  public:
-  static leng_t btree_slot_counter;  // Counter to initialize B-Tree in metadata page
 
   explicit ExtendedBTree(buffer::BufferManager *buffer_pool, ColumnRowStore *column_row_store,
                          std::vector<u32> &columnSizes, bool append_bias = false);

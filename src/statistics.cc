@@ -4,6 +4,7 @@
 
 namespace leanstore::statistics {
 
+std::atomic<u64> total_scanned_tuples                                = 0;
 std::atomic<u64> total_committed_txn                                 = 0;
 std::atomic<u64> txn_processed[MAX_NUMBER_OF_WORKER]                 = {};
 std::atomic<u64> commit_rounds[MAX_NUMBER_OF_WORKER]                 = {};

@@ -10,6 +10,7 @@
 #include <tuple>
 #include <vector>
 
+
 using leanstore::sync::DeferLog;
 using leanstore::sync::ExclusiveGuard;
 using leanstore::sync::OptimisticGuard;
@@ -29,8 +30,7 @@ namespace leanstore::storage {
 
 leng_t BTree::btree_slot_counter = 0;
 
-BTree::BTree(buffer::BufferManager *buffer_pool, bool append_bias)
-    : buffer_(buffer_pool), append_bias_(append_bias) {
+BTree::BTree(buffer::BufferManager *buffer_pool, bool append_bias) : buffer_(buffer_pool), append_bias_(append_bias) {
   ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
   ExclusiveGuard<BTreeNode> root_page(buffer_, buffer_->AllocPage());
   new (root_page.Ptr()) storage::BTreeNode(true);
@@ -151,6 +151,7 @@ void BTree::TrySplit(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNod
 
   // must split parent to make space for separator, restart from root to do this
   node.Unlock();
+
   EnsureSpaceForSplit(parent.UnlockAndGetPtr(), {sep_key, sep_info.len});
 }
 
@@ -489,7 +490,6 @@ auto BTree::CountEntries() -> u64 {
 
   return IterateAllNodes(node, [](BTreeNode &) { return 0; }, [](BTreeNode &node) { return node.header.count; });
 }
-
 
 // -------------------------------------------------------------------------------------
 

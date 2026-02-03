@@ -4,6 +4,7 @@
 #include "common/utils.h"
 #include "leanstore/env.h"
 #include "storage/blob/blob_manager.h"
+#include "storage/btree/tree.h"
 #include "storage/hybrid/columnrowstore.h"
 
 #include <cstring>
@@ -29,15 +30,13 @@ using leanstore::sync::SharedGuard;
 
 namespace leanstore::storage {
 
-leng_t ExtendedBTree::btree_slot_counter = 0;
-
 ExtendedBTree::ExtendedBTree(buffer::BufferManager *buffer_pool, ColumnRowStore *column_row_store,
                              std::vector<u32> &columnSizes, bool append_bias)
     : buffer_(buffer_pool), column_row_store_(column_row_store), column_sizes_(columnSizes), append_bias_(append_bias) {
   ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
   ExclusiveGuard<BTreeNodeWithTimeStamp> root_page(buffer_, buffer_->AllocPage());
   new (root_page.Ptr()) storage::BTreeNodeWithTimeStamp(true);
-  metadata_slotid_                   = btree_slot_counter++;
+  metadata_slotid_                   = BTree::btree_slot_counter++;
   meta_page->roots[metadata_slotid_] = root_page.PageID();
   // -------------------------------------------------------------------------------------
   meta_page.AdvanceGSN();
@@ -608,13 +607,31 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
         const u32 size = column_sizes_[col_idx];
         tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
                                  payloadData + recordOffset + size);
+        recordOffset += size;
       }
     }
   }
+  {
+    OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+    for (auto entry_idx = 0; entry_idx < rightmost_child.Ptr()->header.count; entry_idx++) {
+      // row id
+      u8 *tmpRowId = rightmost_child.Ptr()->GetKey(entry_idx);
+      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowId, tmpRowId + sizeof(u64));
+      // payload
+      u8 *payloadData     = rightmost_child.Ptr()->GetPayload(entry_idx).data();
+      size_t recordOffset = 0;
+      // split payload into column values
+      for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+        const u32 size = column_sizes_[col_idx];
+        tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+                                 payloadData + recordOffset + size);
+        recordOffset += size;
+      }
+    }
+  }
+
   // store cold data
   column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
-  // free removed nodes
-  // TODO
 
   node.Unlock();
 }
@@ -671,6 +688,7 @@ void ExtendedBTree::IterateLeafParents(OptimisticGuard<BTreeNodeWithTimeStamp> &
     if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
       // data is expired -> move to cold data
       RemoveInnerNode(std::move(parent_locked), std::move(node_locked));
+      throw sync::RestartException{};
     }
   } else {
     IterateLeafParents(child, node, current_time);

@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace leanstore::statistics {
-
+extern std::atomic<u64> total_scanned_tuples;
 extern std::atomic<u64> total_committed_txn;
 extern std::atomic<u64> txn_processed[MAX_NUMBER_OF_WORKER];
 extern std::atomic<u64> commit_rounds[MAX_NUMBER_OF_WORKER];

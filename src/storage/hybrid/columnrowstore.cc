@@ -1,5 +1,7 @@
 #include "storage/hybrid/columnrowstore.h"
 #include <stdexcept>
+#include "leanstore/env.h"
+#include "leanstore/statistics.h"
 
 namespace leanstore::storage {
 
@@ -41,17 +43,18 @@ auto ColumnRowStore::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bo
   if (chunk == nullptr) { return false; }
   // find idx in row id column
   int idx = -1;
-  this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk](std::span<const uint8_t> data) {
+  this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &row_id](std::span<const uint8_t> data) {
     // find idx with binary search
     u32 lower = 0;             // inclusive
     u32 upper = chunk->count;  // exclusive
     // binary search on remaining range
+    const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
     while (lower < upper) {
-      auto mid = ((upper - lower) / 2) + lower;
-      auto ret = std::memcmp(data.data() + (lower << 3), data.data() + (upper << 3), 8);
-      if (ret < 0) {
+      auto mid      = ((upper - lower) / 2) + lower;
+      u64 mid_value = row_id_columns[mid];
+      if (mid_value > row_id) {
         upper = mid;
-      } else if (ret > 0) {
+      } else if (mid_value < row_id) {
         lower = mid + 1;
       } else {
         idx = mid;
@@ -80,6 +83,7 @@ auto ColumnRowStore::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bo
 
 void ColumnRowStore::Insert(std::span<u8> key, std::span<const u8> payload) {
   assert((key.size() + payload.size()) <= BTreeNode::MAX_RECORD_SIZE);
+  assert((key.size() + payload.size()) <= BTreeNodeWithTimeStamp::MAX_RECORD_SIZE);
   // get new row id
   u64 row_id = next_row_id.fetch_add(1);
   // inserted data is always hot data
@@ -122,7 +126,7 @@ auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, cons
 }
 
 /**
- * func is used to modidy the current payload; delta is ignored!
+ * func is used to modidy the current payload; delta is ignored! (does also update out of place!)
  */
 auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool {
   // get row id
@@ -158,6 +162,7 @@ void ColumnRowStore::ScanDescending(std::span<u8> key, const AccessRecordFunc &f
   (void)key;
   (void)fn;
   throw std::runtime_error("not implemented");
+  // TODO
 }
 
 void ColumnRowStore::ConvertHotDataToColdData() { hot_data.MoveHotDataToColdData(); }
@@ -173,16 +178,21 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &co
     row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); });
   }
   // hot data
-  bool found = false;
+  bool found         = false;
+  u64 tuples_scanned = 0;
   hot_data.ScanAscending(U64ToSpanU8(row_id), [&](std::span<u8> tmp_row_id, std::span<u8> tmp_payload) {
     // get key (always exists!)
     row_id_to_key_index.LookUp(tmp_row_id, [&](std::span<u8> tmp_key) {
       // call fn
       found = fn(tmp_key, tmp_payload);
+      tuples_scanned++;
     });
     return found;
   });
-  if (!found) { return; }
+  if (!found) {
+    if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
+    return;
+  }
   // cold data
   // record size estimate
   size_t estimatedRecordSize = 0;
@@ -195,9 +205,9 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &co
     // TODO delete/merge empty chunk during iteration
     if (chunk.maxRowId < row_id) { continue; }
     // load blobs
-    blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void)data; });
+    this->blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void)data; });
     for (u32 column_idx : column_idxs) {
-      blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) { (void)data; });
+      this->blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) { (void)data; });
     }
     // build records & apply function
     for (u32 i = 0; i < chunk.count; i++) {
@@ -210,13 +220,17 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &co
                       chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx] + columnSizes[column_idx]));
       }
       // call fn
+      tuples_scanned++;
       if (!fn(std::span<u8>(), record)) {
         // return if fn is false (similar to other scan)
+        if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
         return;
       }
     }
-    // TODO unload blobs?
+    // unload blobs for best performance
+    this->blob_->UnloadAllBlobs();
   }
+  if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
 }
 
 /**
@@ -373,7 +387,7 @@ void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vec
   newColumnData.key_column     = blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false);
   newColumnData.totalSizeBytes = rowIds.size() + keys.size();
   // store columns
-  newColumnData.column_parts.resize(columnSizes.size());
+  newColumnData.column_parts.reserve(columnSizes.size());
   for (std::vector<u8> &column : data) {
     newColumnData.column_parts.emplace_back(blob_->AllocateBlob({column.data(), column.size()}, nullptr, false));
     newColumnData.totalSizeBytes += column.size();

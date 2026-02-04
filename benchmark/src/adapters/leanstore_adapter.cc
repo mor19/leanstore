@@ -12,6 +12,8 @@
 #include "leanstore/schema.h"
 
 #include <span>
+#include <unordered_set>
+#include <vector>
 
 template <class RecordBase>
 LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db, std::vector<u32> columnSizes)
@@ -73,8 +75,9 @@ void LeanStoreAdapter<RecordBase>::ScanDesc(const typename RecordBase::Key &key,
 
 template <class RecordBase>
 void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key &r_key,
-                                                 const std::vector<uint32_t> &column_idxs,
-                                                 const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb) {
+                                                 const std::unordered_set<uint32_t> &column_idxs,
+                                                 const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
+                                                 const bool ascending) {
   u8 key[RecordBase::MaxFoldLength()];
   auto len = RecordBase::FoldKey(key, r_key);
 
@@ -84,21 +87,7 @@ void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key 
     return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
   };
 
-  // for compatibility
-  auto all_key_bytes_zero = true;
-  for (size_t i = 0; i < len; i++) {
-    if (!key[i]) {
-      all_key_bytes_zero = false;
-      break;
-    }
-  }
-  if (all_key_bytes_zero) {
-    // scan from start
-    tree_->ScanOptimized(std::span<uint8_t>(), column_idxs, read_cb);
-  } else {
-    // start scan from specific key (order is still insertion order!)
-    tree_->ScanOptimized({key, len}, column_idxs, read_cb);
-  }
+  tree_->ScanOptimized({key, len}, column_idxs, read_cb, ascending);
 }
 
 template <class RecordBase>

@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <random>
+#include <unordered_set>
 #include <vector>
 
 namespace tpcc {
@@ -38,70 +39,79 @@ void TPCCWorkloadExtended<AdapterType>::Query2() {
   // Pick target region
   Integer target_region = UniformRand(0, 4);
   // Scan region
-  this->region.ScanOptimized({target_region}, {}, [&](const RegionType::Key &r_key, const RegionType &r_rec) {
-    (void)r_rec;
-    if (r_key.r_regionkey == target_region) {
-      // found target region
-      // Scan nation
-      this->nation.ScanOptimized({0}, {1}, [&](const NationType::Key &n_key, const NationType &n_rec) {
-        if (n_rec.n_regionkey != target_region) {
-          // ignore nation with wrong region
-          return true;
-        }
-        // Scan suppliers
-        this->supplier.ScanOptimized({0}, {2}, [&](const SupplierType::Key &su_key, const SupplierType &su_rec) {
-          if (su_rec.su_nationkey != n_key.n_nationkey) {
-            // ignore supplier from wrong nation
-            return true;
-          }
-          StockType::Key min_stock_key(0, 0);
-          StockType min_stock(0, Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""),
-                              Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), 0, 0,
-                              0, Varchar<24>(""));
-          Integer minQty = std::numeric_limits<Integer>::max();
-
-          for (auto &it : supp_stock_map[su_key.su_suppkey]) {
-            StockType::Key k_s = {it.first, it.second};
-            StockType v_s(0, Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""),
-                          Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), 0, 0, 0,
-                          Varchar<24>(""));
-            this->stock.LookUp(k_s, [&](const StockType &s_rec) {
-              v_s.s_quantity   = s_rec.s_quantity;
-              v_s.s_ytd        = s_rec.s_ytd;
-              v_s.s_order_cnt  = s_rec.s_order_cnt;
-              v_s.s_remote_cnt = s_rec.s_remote_cnt;
+  this->region.ScanOptimized(
+    {target_region}, {},
+    [&](const RegionType::Key &r_key, const RegionType &r_rec) {
+      (void)r_rec;
+      if (r_key.r_regionkey == target_region) {
+        // found target region
+        // Scan nation
+        this->nation.ScanOptimized(
+          {0}, {1},
+          [&](const NationType::Key &n_key, const NationType &n_rec) {
+            if (n_rec.n_regionkey != target_region) {
+              // ignore nation with wrong region
               return true;
-            });
-
-            if (minQty > v_s.s_quantity) {
-              minQty                 = v_s.s_quantity;
-              min_stock_key.s_w_id   = k_s.s_w_id;
-              min_stock_key.s_i_id   = k_s.s_i_id;
-              min_stock.s_quantity   = v_s.s_quantity;
-              min_stock.s_ytd        = v_s.s_ytd;
-              min_stock.s_order_cnt  = v_s.s_order_cnt;
-              min_stock.s_remote_cnt = v_s.s_remote_cnt;
             }
-          }
-          if (minQty == std::numeric_limits<Integer>::max()) {
-            // no stock found
+            // Scan suppliers
+            this->supplier.ScanOptimized(
+              {0}, {2},
+              [&](const SupplierType::Key &su_key, const SupplierType &su_rec) {
+                if (su_rec.su_nationkey != n_key.n_nationkey) {
+                  // ignore supplier from wrong nation
+                  return true;
+                }
+                StockType::Key min_stock_key(0, 0);
+                StockType min_stock(0, Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""),
+                                    Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""),
+                                    Varchar<24>(""), 0, 0, 0, Varchar<24>(""));
+                Integer minQty = std::numeric_limits<Integer>::max();
+
+                for (auto &it : supp_stock_map[su_key.su_suppkey]) {
+                  StockType::Key k_s = {it.first, it.second};
+                  StockType v_s(0, Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""),
+                                Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), Varchar<24>(""), 0,
+                                0, 0, Varchar<24>(""));
+                  this->stock.LookUp(k_s, [&](const StockType &s_rec) {
+                    v_s.s_quantity   = s_rec.s_quantity;
+                    v_s.s_ytd        = s_rec.s_ytd;
+                    v_s.s_order_cnt  = s_rec.s_order_cnt;
+                    v_s.s_remote_cnt = s_rec.s_remote_cnt;
+                    return true;
+                  });
+
+                  if (minQty > v_s.s_quantity) {
+                    minQty                 = v_s.s_quantity;
+                    min_stock_key.s_w_id   = k_s.s_w_id;
+                    min_stock_key.s_i_id   = k_s.s_i_id;
+                    min_stock.s_quantity   = v_s.s_quantity;
+                    min_stock.s_ytd        = v_s.s_ytd;
+                    min_stock.s_order_cnt  = v_s.s_order_cnt;
+                    min_stock.s_remote_cnt = v_s.s_remote_cnt;
+                  }
+                }
+                if (minQty == std::numeric_limits<Integer>::max()) {
+                  // no stock found
+                  return true;
+                }
+                // fetching the lowest stock level item (data only for simplicity)
+                std::string i_data_str = this->item.LookupField({min_stock_key.s_i_id}, &ItemType::i_data).ToString();
+                // filtering item (i_data like '%b')
+                auto found = i_data_str.find('b');
+                if (found != std::string::npos) { return true; }
+                // handle found item (...)
+                // std::cout << std::to_string(min_stock_key.s_i_id) << ": " << i_data_str << "\n";
+                return true;
+              },
+              true);
             return true;
-          }
-          // fetching the lowest stock level item (data only for simplicity)
-          std::string i_data_str = this->item.LookupField({min_stock_key.s_i_id}, &ItemType::i_data).ToString();
-          // filtering item (i_data like '%b')
-          auto found = i_data_str.find('b');
-          if (found != std::string::npos) { return true; }
-          // handle found item (...)
-          // std::cout << std::to_string(min_stock_key.s_i_id) << ": " << i_data_str << "\n";
-          return true;
-        });
-        return true;
-      });
-      return false;
-    }
-    return false; // not directly found -> not in region table
-  });
+          },
+          true);
+        return false;
+      }
+      return false;  // not directly found -> not in region table
+    },
+    true);
 }
 
 // load extra data

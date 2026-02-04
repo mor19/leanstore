@@ -18,6 +18,7 @@
 #include <functional>
 #include <span>
 #include <tuple>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -42,7 +43,8 @@ class ColumnRowStore : public HKVInterface {
   auto UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool override;
   void ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) override;
   void ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) override;
-  void ScanOptimized(std::span<u8> key, const std::vector<u32> &column_idxs, const AccessRecordFunc &fn) override;
+  void ScanOptimized(std::span<u8> key, const std::unordered_set<u32> &column_idxs, const AccessRecordFunc &fn,
+                     const bool ascending) override;
   auto CountEntries() -> u64 override;
   auto SizeInMB() -> float override;
   auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
@@ -70,7 +72,7 @@ class ColumnRowStore : public HKVInterface {
   std::vector<u32> columnSizes;
   storage::ExtendedBTree hot_data;
   std::vector<ColumnChunk> cold_data;
-  std::vector<u32> allColumnIndices;  // contains all column indices
+  std::unordered_set<u32> allColumnIndices;  // contains all column indices
 };
 
 }  // namespace leanstore::storage

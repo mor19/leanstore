@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <random>
+#include <unordered_set>
 
 namespace fts {
 
@@ -18,7 +19,7 @@ Numeric FTSWorkload<AdapterType>::GetOrderTotalPrice(Integer w_id, Integer d_id,
       orderTotalPrice = orderTotalPrice + ol_rec.ol_amount;
     }
     return true;
-  });
+  }, true);
   return orderTotalPrice;
 }
 
@@ -32,7 +33,7 @@ Numeric FTSWorkload<AdapterType>::GetRevenueInDistrict(Integer w_id, Integer d_i
       districtRevenue = districtRevenue + ol_rec.ol_amount;
     }
     return true;
-  });
+  }, true);
   return districtRevenue;
 }
 
@@ -44,7 +45,7 @@ Numeric FTSWorkload<AdapterType>::GetTotalRevenue() {
     // sum up all amounts (ol_quantity * i_price) of all order lines to get the total revenue
     totalRevenue = totalRevenue + ol_rec.ol_amount;
     return true;
-  });
+  }, true);
   return totalRevenue;
 }
 

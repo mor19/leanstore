@@ -10,6 +10,7 @@
 #include <cstring>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace leanstore::storage {
 
@@ -158,8 +159,8 @@ TEST_F(TestColumnRowStore, TreeScan) {
   };
 
   // ScanOptimized
-  std::vector<u32> columnIdxs = {0};
-  columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb);
+  std::unordered_set<u32> columnIdxs = {0};
+  columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
     ASSERT_TRUE(scan_result.find(pair.first) != scan_result.end());
@@ -176,17 +177,16 @@ TEST_F(TestColumnRowStore, TreeScan) {
     ASSERT_TRUE(scan_result[pair.first] == pair.second);
   }
 
-  // not implemented
-  // // Scan Desc
-  // start_key = NO_RECORDS + 1;
-  // key       = std::span<u8>{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
-  // scan_result.clear();
-  // columnrowstore_->ScanDescending(key, read_cb);
-  // for (auto &pair : data) {
-  //   EXPECT_TRUE(scan_result.find(pair.first) != scan_result.end());
-  //   EXPECT_TRUE(scan_result[pair.first] == pair.second);
-  // }
-  // EXPECT_EQ(scan_result.size(), data.size());
+  // Scan Desc
+  start_key = NO_RECORDS + 1;
+  key       = std::span<u8>{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
+  scan_result.clear();
+  columnrowstore_->ScanDescending(key, read_cb);
+  for (auto &pair : data) {
+    EXPECT_TRUE(scan_result.find(pair.first) != scan_result.end());
+    EXPECT_TRUE(scan_result[pair.first] == pair.second);
+  }
+  EXPECT_EQ(scan_result.size(), data.size());
 }
 
 TEST_F(TestColumnRowStore, InsertAndCheckOrder) {
@@ -271,8 +271,8 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   };
 
   // ScanOptimized
-  std::vector<u32> columnIdxs = {0};
-  columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb);
+  std::unordered_set<u32> columnIdxs = {0};
+  columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
     ASSERT_TRUE(scan_result.find(pair.first) != scan_result.end());
@@ -289,17 +289,16 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
     ASSERT_TRUE(scan_result[pair.first] == pair.second);
   }
 
-  // not implemented
-  // // Scan Desc
-  // start_key = NO_RECORDS + 1;
-  // key       = std::span<u8>{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
-  // scan_result.clear();
-  // columnrowstore_->ScanDescending(key, read_cb);
-  // for (auto &pair : data) {
-  //   EXPECT_TRUE(scan_result.find(pair.first) != scan_result.end());
-  //   EXPECT_TRUE(scan_result[pair.first] == pair.second);
-  // }
-  // EXPECT_EQ(scan_result.size(), data.size());
+  // Scan Desc
+  start_key = NO_RECORDS + 1;
+  key       = std::span<u8>{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
+  scan_result.clear();
+  columnrowstore_->ScanDescending(key, read_cb);
+  for (auto &pair : data) {
+    EXPECT_TRUE(scan_result.find(pair.first) != scan_result.end());
+    EXPECT_TRUE(scan_result[pair.first] == pair.second);
+  }
+  EXPECT_EQ(scan_result.size(), data.size());
 }
 
 TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {

@@ -30,8 +30,7 @@ ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobMan
       columnSizes(columnSizes),
       hot_data(buffer_pool, this, this->columnSizes, append_bias),
       cold_data(),
-      allColumnIndices(),
-      row_id_to_key_index(buffer_pool, true) {
+      allColumnIndices() {
   // generate vector with all column indices
   for (u32 i = 0; i < this->columnSizes.size(); i++) { allColumnIndices.push_back(i); }
 }
@@ -109,7 +108,6 @@ void ColumnRowStore::Insert(std::span<u8> key, std::span<const u8> payload) {
   this->hot_data.Insert(U64ToSpanU8(row_id), payload);
   // insert row id into index
   this->row_id_index.Insert(key, U64ToSpanU8(row_id));
-  this->row_id_to_key_index.Insert(U64ToSpanU8(row_id), key);
 }
 
 auto ColumnRowStore::Remove(std::span<u8> key) -> bool {
@@ -121,7 +119,6 @@ auto ColumnRowStore::Remove(std::span<u8> key) -> bool {
   }
   // remove row id from index
   this->row_id_index.Remove(key);
-  this->row_id_to_key_index.Remove(U64ToSpanU8(row_id));
   return this->InternalRemove(row_id);
 }
 
@@ -138,10 +135,8 @@ auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, cons
   u64 new_row_id = next_row_id.fetch_add(1);
   new_row_id     = __builtin_bswap64(new_row_id);  // swap for memcmp sort compability
   hot_data.Insert(U64ToSpanU8(new_row_id), payload);
-  this->row_id_to_key_index.Insert(U64ToSpanU8(new_row_id), key);
   this->InternalRemove(row_id);
   row_id_index.Update(key, {reinterpret_cast<const u8 *>(&new_row_id), sizeof(new_row_id)}, nullptr);
-  this->row_id_to_key_index.Remove(U64ToSpanU8(row_id));
   return true;
 }
 
@@ -167,10 +162,8 @@ auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, F
   // IGNORING DELTA (because it is for delta logging)
   (void)delta;
   hot_data.Insert(U64ToSpanU8(new_row_id), temp);
-  this->row_id_to_key_index.Insert(U64ToSpanU8(new_row_id), key);
   this->InternalRemove(row_id);
   row_id_index.Update(key, {reinterpret_cast<const u8 *>(&new_row_id), sizeof(new_row_id)}, nullptr);
-  this->row_id_to_key_index.Remove(U64ToSpanU8(row_id));
   return true;
 }
 
@@ -205,6 +198,8 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &co
         })) {
       // not in hot data -> must be in cold data
       // get chunk
+      u64 tmpRowIdU64;
+      std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
       if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
           std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
         // row id in the already loaded blob
@@ -212,15 +207,13 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &co
       } else {
         // new chunk needs to be loaded
         if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
-        u64 tmpRowIdU64;
-        std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
         chunk = FindChunkInColdData(tmpRowIdU64);
         if (chunk == nullptr) { throw std::runtime_error("key in index, but in hot or cold data (chunk not found)"); }
       }
       // get record from chunk
       // find idx in row id column
       int idx = -1;
-      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmp_row_id](std::span<const uint8_t> data) {
+      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
         // find idx with binary search
         u32 lower = 0;             // inclusive
         u32 upper = chunk->count;  // exclusive
@@ -228,7 +221,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &co
         const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
         while (lower < upper) {
           auto mid = lower + ((upper - lower) / 2);
-          auto cmp = std::memcmp(row_id_columns + mid, &tmp_row_id, sizeof(uint64_t));
+          auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
           if (cmp < 0) {
             lower = mid + 1;
           } else if (cmp > 0) {
@@ -451,6 +444,7 @@ auto ColumnRowStore::InternalRemove(u64 row_id) -> bool {
   ColumnChunk *chunk = this->FindChunkInColdData(row_id);
   if (chunk != nullptr) {
     // TODO mark deletion bitmap
+    chunk->count_active = chunk->count_active - 1;
   }
   return true;
 }
@@ -482,14 +476,9 @@ void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vec
   newColumnData.idx_column = CopyBlobState(blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false));
   EvictBlob(newColumnData.idx_column);
   // store keys from rowIds and remove them
+  // TODO(moritz): remove key column
   std::vector<u8> keys;
-  // get keys and remove
-  for (size_t i = 0; i < rowIds.size(); i += sizeof(u64)) {
-    std::span<u8> id(rowIds.data() + i, sizeof(u64));
-    row_id_to_key_index.LookUp(id, [&](std::span<u8> pl) { keys.insert(keys.end(), pl.begin(), pl.end()); });
-    row_id_to_key_index.Remove(id);
-  }
-  newColumnData.key_column     = CopyBlobState(blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false));
+  // newColumnData.key_column     = CopyBlobState(blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false));
   newColumnData.totalSizeBytes = rowIds.size() + keys.size();
   EvictBlob(newColumnData.key_column);
   // store columns

@@ -59,6 +59,9 @@ auto main(int argc, char **argv) -> int {
   db->worker_pool.JoinAll();
   LOG_INFO("Space used: %.4f GB", db->AllocatedSize());
 
+  // move hot to cold data
+  // TODO(moritz)
+
   // run small operation (GetOrderTotalPrice(...))
   db->StartProfilingThread();
   ctrl.StartPerfRuntime();

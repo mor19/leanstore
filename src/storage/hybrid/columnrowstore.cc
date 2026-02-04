@@ -196,9 +196,8 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
       // hot data
       if (!hot_data.LookUp(tmp_row_id, [&](std::span<u8> tmp_payload) {
             // call fn
-            found = fn(tmp_key, tmp_payload);
             tuples_scanned++;
-            return found;
+            found = fn(tmp_key, tmp_payload);
           })) {
         // not in hot data -> must be in cold data
         // get chunk
@@ -261,6 +260,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         }
         this->blob_->UnloadAllBlobs();
         // read
+        tuples_scanned++;
         found = fn(tmp_key, result);
       }
 
@@ -272,9 +272,8 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
       // hot data
       if (!hot_data.LookUp(tmp_row_id, [&](std::span<u8> tmp_payload) {
             // call fn
-            found = fn(tmp_key, tmp_payload);
             tuples_scanned++;
-            return found;
+            found = fn(tmp_key, tmp_payload);
           })) {
         // not in hot data -> must be in cold data
         // get chunk
@@ -337,6 +336,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         }
         this->blob_->UnloadAllBlobs();
         // read
+        tuples_scanned++;
         found = fn(tmp_key, result);
       }
 
@@ -347,71 +347,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
   // unload column chunk
   if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
 
-  // TODO marker end new
-
-  // TODO
-  // // get row id
-  // u64 row_id = 0;
-  // if (key.size() != 0) {
-  //   row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); });
-  // }
-
-  // // hot data
-  // bool found         = false;
-  // u64 tuples_scanned = 0;
-  // hot_data.ScanAscending(U64ToSpanU8(row_id), [&](std::span<u8> tmp_row_id, std::span<u8> tmp_payload) {
-  //   // get key (always exists!)
-  //   row_id_to_key_index.LookUp(tmp_row_id, [&](std::span<u8> tmp_key) {
-  //     // call fn
-  //     found = fn(tmp_key, tmp_payload);
-  //     tuples_scanned++;
-  //   });
-  //   return found;
-  // });
-  // if (!found) {
-  //   if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
-  //   return;
-  // }
-  // // cold data
-  // // record size estimate
-  // size_t estimatedRecordSize = 0;
-  // for (u32 columnSize : columnSizes) { estimatedRecordSize += columnSize; }
-  // // TODO key
-  // u64 record_row_id;
-  // std::vector<u8> record(estimatedRecordSize);
-  // std::fill(record.begin(), record.end(), 0);
-
-  // for (ColumnChunk &chunk : this->cold_data) {
-  //   // TODO delete/merge empty chunk during iteration
-  //   if (chunk.maxRowId < row_id) { continue; }
-  //   // load blobs
-  //   this->blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void)data; });
-  //   for (u32 column_idx : column_idxs) {
-  //     this->blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) { (void)data; });
-  //   }
-  //   // build records & apply function
-  //   for (u32 i = 0; i < chunk.count; i++) {
-  //     std::memcpy(&record_row_id, chunk.idx_column->Data(), sizeof(u64));
-  //     if (record_row_id < row_id) { continue; }
-  //     // build record
-  //     record.clear();
-  //     for (u32 column_idx : column_idxs) {
-  //       record.insert(record.end(), chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx]),
-  //                     chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx] +
-  //                     columnSizes[column_idx]));
-  //     }
-  //     // call fn
-  //     tuples_scanned++;
-  //     if (!fn(std::span<u8>(), record)) {
-  //       // return if fn is false (similar to other scan)
-  //       if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
-  //       return;
-  //     }
-  //   }
-  //   // unload blobs for best performance
-  //   this->blob_->UnloadAllBlobs();
-  // }
-  // if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
+  if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
 }
 
 /**

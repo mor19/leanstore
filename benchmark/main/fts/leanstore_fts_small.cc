@@ -59,6 +59,9 @@ auto main(int argc, char **argv) -> int {
   db->worker_pool.JoinAll();
   LOG_INFO("Space used: %.4f GB", db->AllocatedSize());
 
+  // move hot to cold data
+  // TODO(moritz)
+
   // run small operation (GetOrderTotalPrice(...))
   db->StartProfilingThread();
   ctrl.StartPerfRuntime();
@@ -86,7 +89,5 @@ auto main(int argc, char **argv) -> int {
   LOG_INFO("executed small query %d times on %d worker threads", FLAGS_fts_run_queries_count, FLAGS_worker_count);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
-  // TODO(moritz) get time counter!
-  LOG_INFO("scan: %.4f tuples/s",
-           leanstore::statistics::total_scanned_tuples.load() / static_cast<double>(FLAGS_htap_expire_seconds));
+  LOG_INFO("scan: %.4f tuples/s", leanstore::statistics::total_scanned_tuples.load() / e.getDuration());
 }

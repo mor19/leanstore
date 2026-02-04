@@ -87,6 +87,9 @@ auto main(int argc, char **argv) -> int {
   });
 #endif
 
+  // move hot to cold data
+  // TODO(moritz)
+
   // extended TPC-C execution
   db->StartProfilingThread();
   ctrl.StartPerfRuntime();

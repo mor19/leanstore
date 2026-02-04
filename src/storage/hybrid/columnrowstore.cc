@@ -14,6 +14,7 @@ inline blob::BlobState *CopyBlobState(const blob::BlobState *blobState) {
   return copiedBlobState;
 }
 
+// TODO(moritz): evict needed?
 inline void ColumnRowStore::EvictBlob(const blob::BlobState *blobState) {
   // for (auto &extent : blobState->extents) { buffer_->EvictExtent(extent.start_pid); }
   // this->buffer_->EvictExtent(transaction::TransactionManager::active_txn.ToEvictedExtents().back());
@@ -458,14 +459,12 @@ auto ColumnRowStore::CountPages() -> u64 {
  * internal remove removes row_id from either hot or cold data, but not from the row id index!
  */
 auto ColumnRowStore::InternalRemove(u64 row_id) -> bool {
-  // TODO
   // hot data
   if (hot_data.Remove(U64ToSpanU8(row_id))) { return true; }
   // cold data
-  // TODO
   ColumnChunk *chunk = this->FindChunkInColdData(row_id);
   if (chunk != nullptr) {
-    // TODO mark deletion bitmap
+    // TODO(moritz): mark deletion bitmap
     chunk->count_active = chunk->count_active - 1;
   }
   return true;
@@ -497,12 +496,7 @@ void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vec
   // store rowId column
   newColumnData.idx_column = CopyBlobState(blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false));
   EvictBlob(newColumnData.idx_column);
-  // store keys from rowIds and remove them
-  // TODO(moritz): remove key column
-  std::vector<u8> keys;
-  // newColumnData.key_column     = CopyBlobState(blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false));
-  newColumnData.totalSizeBytes = rowIds.size() + keys.size();
-  EvictBlob(newColumnData.key_column);
+  newColumnData.totalSizeBytes = rowIds.size();
   // store columns
   newColumnData.column_parts.reserve(columnSizes.size());
   for (std::vector<u8> &column : data) {

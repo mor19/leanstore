@@ -143,14 +143,8 @@ void TPCCWorkloadExtended<AdapterType>::LoadSupplier() {
 
 template <template <typename> class AdapterType>
 auto TPCCWorkloadExtended<AdapterType>::ExecuteTransaction(Integer w_id) -> int {
-  // TODO(moritz): change chances
-  auto rnd = UniformRand(1, 200);
-  if (rnd <= 100) {
-    // long running query (adapted TPC-H Query 2)
-    Query2();
-    return -1;
-  }
-  rnd -= 100;
+  // TPC-C workload task
+  auto rnd = UniformRand(1, 100);
   if (rnd <= 43) {
     this->DoPaymentRandom(w_id);
     return 0;
@@ -172,6 +166,9 @@ auto TPCCWorkloadExtended<AdapterType>::ExecuteTransaction(Integer w_id) -> int 
   }
   Ensure(rnd - 4 <= 45);
   this->DoNewOrderRandom(w_id);
+
+  // long running query (adapted TPC-H Query 2)
+  Query2();
   return 4;
 }
 

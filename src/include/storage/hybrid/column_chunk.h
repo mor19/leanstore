@@ -13,9 +13,8 @@ struct ColumnChunk {
   u64 maxRowId;      // maximum row Id
   u32 count;         // count of all tuples
   u32 count_active;  // count of tuples that are not marked as deleted
-  // TODO bitmap for deletion
+  // TODO(moritz): bitmap for deletion
   blob::BlobState *idx_column;
-  blob::BlobState *key_column;
   std::vector<blob::BlobState *> column_parts;
 };
 

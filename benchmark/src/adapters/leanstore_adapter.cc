@@ -1,9 +1,11 @@
 #include "benchmark/adapters/leanstore_adapter.h"
 #include "benchmark/filebench/webserver/schema.h"
+#include "benchmark/fts/schema.h"
 #include "benchmark/fuse/schema.h"
 #include "benchmark/gitclone/schema.h"
 #include "benchmark/tatp/schema.h"
 #include "benchmark/tpcc/schema.h"
+#include "benchmark/tpcc_extended/schema_extended.h"
 #include "benchmark/utils/test_utils.h"
 #include "benchmark/wikipedia/schema.h"
 #include "benchmark/ycsb/schema.h"
@@ -33,11 +35,13 @@ void LeanStoreAdapter<RecordBase>::ScanImpl(const typename RecordBase::Key &r_ke
                                             const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
                                             bool scan_ascending) {
   u8 key[RecordBase::MaxFoldLength()];
-  auto len = RecordBase::FoldKey(key, r_key);
+  auto len                  = RecordBase::FoldKey(key, r_key);
+  u64 tmpScannedTuplesCount = 0;
 
   auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
     typename RecordBase::Key typed_key;
     RecordBase::UnfoldKey(key.data(), typed_key);
+    tmpScannedTuplesCount++;
     return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
   };
 
@@ -46,6 +50,7 @@ void LeanStoreAdapter<RecordBase>::ScanImpl(const typename RecordBase::Key &r_ke
   } else {
     tree_->ScanDescending({key, len}, read_cb);
   }
+  leanstore::statistics::total_scanned_tuples += tmpScannedTuplesCount;
 }
 
 template <class RecordBase>
@@ -141,8 +146,8 @@ void LeanStoreAdapter<RecordBase>::MiniTransactionWrapper(const std::function<vo
 }
 
 template <class RecordBase>
-auto LeanStoreAdapter<RecordBase>::RegisterBlob(std::span<u8> blob_payload, std::span<u8> prev_blob,
-                                                bool likely_grow) -> std::span<const u8> {
+auto LeanStoreAdapter<RecordBase>::RegisterBlob(std::span<u8> blob_payload, std::span<u8> prev_blob, bool likely_grow)
+  -> std::span<const u8> {
   auto prev_btup = (prev_blob.empty()) ? nullptr : reinterpret_cast<leanstore::BlobState *>(prev_blob.data());
   return db_->CreateNewBlob(blob_payload, prev_btup, likely_grow);
 }
@@ -188,6 +193,14 @@ template struct LeanStoreAdapter<tpcc::OrderWDCType>;
 template struct LeanStoreAdapter<tpcc::OrderLineType>;
 template struct LeanStoreAdapter<tpcc::ItemType>;
 template struct LeanStoreAdapter<tpcc::StockType>;
+
+// For TPC-C Extended
+template struct LeanStoreAdapter<tpcc::NationType>;
+template struct LeanStoreAdapter<tpcc::RegionType>;
+template struct LeanStoreAdapter<tpcc::SupplierType>;
+
+// For FTS
+template struct LeanStoreAdapter<fts::OrderLineType>;
 
 // For TATP
 template struct LeanStoreAdapter<tatp::SubscriberType>;

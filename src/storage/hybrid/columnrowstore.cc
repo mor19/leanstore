@@ -175,7 +175,6 @@ auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, F
 }
 
 void ColumnRowStore::ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) {
-  WarningMessage("Order is insertion order, not PK order!");
   ScanOptimized(key, this->allColumnIndices, fn);
 }
 
@@ -192,66 +191,148 @@ void ColumnRowStore::ConvertHotDataToColdData() { hot_data.MoveHotDataToColdData
  * call with empty std::span<u8> as key to start from lowest row id
  */
 void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &column_idxs, const AccessRecordFunc &fn) {
-  // TODO
-  // get row id
-  u64 row_id = 0;
-  if (key.size() != 0) {
-    row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); });
-  }
-  // hot data
+  // iterate over key to row index & lookup row ids
   bool found         = false;
   u64 tuples_scanned = 0;
-  hot_data.ScanAscending(U64ToSpanU8(row_id), [&](std::span<u8> tmp_row_id, std::span<u8> tmp_payload) {
-    // get key (always exists!)
-    row_id_to_key_index.LookUp(tmp_row_id, [&](std::span<u8> tmp_key) {
-      // call fn
-      found = fn(tmp_key, tmp_payload);
-      tuples_scanned++;
-    });
+  ColumnChunk *chunk = nullptr;
+  row_id_index.ScanAscending(key, [&](std::span<u8> tmp_key, std::span<u8> tmp_row_id) {
+    // hot data
+    if (!hot_data.LookUp(tmp_row_id, [&](std::span<u8> tmp_payload) {
+          // call fn
+          found = fn(tmp_key, tmp_payload);
+          tuples_scanned++;
+          return found;
+        })) {
+      // not in hot data -> must be in cold data
+      // get chunk
+      if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
+          std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
+        // row id in the already loaded blob
+        //
+      } else {
+        // new chunk needs to be loaded
+        if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+        u64 tmpRowIdU64;
+        std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
+        chunk = FindChunkInColdData(tmpRowIdU64);
+        if (chunk == nullptr) { throw std::runtime_error("key in index, but in hot or cold data (chunk not found)"); }
+      }
+      // get record from chunk
+      // find idx in row id column
+      int idx = -1;
+      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmp_row_id](std::span<const uint8_t> data) {
+        // find idx with binary search
+        u32 lower = 0;             // inclusive
+        u32 upper = chunk->count;  // exclusive
+        // binary search on remaining range
+        const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
+        while (lower < upper) {
+          auto mid = lower + ((upper - lower) / 2);
+          auto cmp = std::memcmp(row_id_columns + mid, &tmp_row_id, sizeof(uint64_t));
+          if (cmp < 0) {
+            lower = mid + 1;
+          } else if (cmp > 0) {
+            upper = mid;
+          } else {
+            idx = mid;
+            break;
+          }
+        }
+      });
+      if (idx == -1) {
+        this->blob_->UnloadAllBlobs();
+        throw std::runtime_error("key in index, but in hot or cold data (index in chunk not found)");
+      }
+      // load all payload columns
+      // TODO(moritz) partial loads
+      std::vector<u8> result;
+      // copy tuple value for each column
+      for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
+        u32 columnSize = this->columnSizes[column_idx];
+        this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
+                              [&idx, &result, &columnSize](std::span<const uint8_t> data) {
+                                // copy into result vector
+                                for (u32 i = 0; i < columnSize; i++) {
+                                  result.push_back(*(data.data() + (idx * columnSize + i)));
+                                }
+                              });
+      }
+      this->blob_->UnloadAllBlobs();
+      // read
+      found = fn(tmp_key, result);
+    }
+
     return found;
   });
-  if (!found) {
-    if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
-    return;
-  }
-  // cold data
-  // record size estimate
-  size_t estimatedRecordSize = 0;
-  for (u32 columnSize : columnSizes) { estimatedRecordSize += columnSize; }
-  // TODO key
-  u64 record_row_id;
-  std::vector<u8> record(estimatedRecordSize);
-  std::fill(record.begin(), record.end(), 0);
-  for (ColumnChunk &chunk : this->cold_data) {
-    // TODO delete/merge empty chunk during iteration
-    if (chunk.maxRowId < row_id) { continue; }
-    // load blobs
-    this->blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void)data; });
-    for (u32 column_idx : column_idxs) {
-      this->blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) { (void)data; });
-    }
-    // build records & apply function
-    for (u32 i = 0; i < chunk.count; i++) {
-      std::memcpy(&record_row_id, chunk.idx_column->Data(), sizeof(u64));
-      if (record_row_id < row_id) { continue; }
-      // build record
-      record.clear();
-      for (u32 column_idx : column_idxs) {
-        record.insert(record.end(), chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx]),
-                      chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx] + columnSizes[column_idx]));
-      }
-      // call fn
-      tuples_scanned++;
-      if (!fn(std::span<u8>(), record)) {
-        // return if fn is false (similar to other scan)
-        if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
-        return;
-      }
-    }
-    // unload blobs for best performance
-    this->blob_->UnloadAllBlobs();
-  }
-  if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
+
+  // unload column chunk
+  if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+
+  // TODO marker end new
+
+  // TODO
+  // // get row id
+  // u64 row_id = 0;
+  // if (key.size() != 0) {
+  //   row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); });
+  // }
+
+  // // hot data
+  // bool found         = false;
+  // u64 tuples_scanned = 0;
+  // hot_data.ScanAscending(U64ToSpanU8(row_id), [&](std::span<u8> tmp_row_id, std::span<u8> tmp_payload) {
+  //   // get key (always exists!)
+  //   row_id_to_key_index.LookUp(tmp_row_id, [&](std::span<u8> tmp_key) {
+  //     // call fn
+  //     found = fn(tmp_key, tmp_payload);
+  //     tuples_scanned++;
+  //   });
+  //   return found;
+  // });
+  // if (!found) {
+  //   if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
+  //   return;
+  // }
+  // // cold data
+  // // record size estimate
+  // size_t estimatedRecordSize = 0;
+  // for (u32 columnSize : columnSizes) { estimatedRecordSize += columnSize; }
+  // // TODO key
+  // u64 record_row_id;
+  // std::vector<u8> record(estimatedRecordSize);
+  // std::fill(record.begin(), record.end(), 0);
+
+  // for (ColumnChunk &chunk : this->cold_data) {
+  //   // TODO delete/merge empty chunk during iteration
+  //   if (chunk.maxRowId < row_id) { continue; }
+  //   // load blobs
+  //   this->blob_->LoadBlob(chunk.idx_column, 0, [&](std::span<const uint8_t> data) { (void)data; });
+  //   for (u32 column_idx : column_idxs) {
+  //     this->blob_->LoadBlob(chunk.column_parts[column_idx], 0, [&](std::span<const uint8_t> data) { (void)data; });
+  //   }
+  //   // build records & apply function
+  //   for (u32 i = 0; i < chunk.count; i++) {
+  //     std::memcpy(&record_row_id, chunk.idx_column->Data(), sizeof(u64));
+  //     if (record_row_id < row_id) { continue; }
+  //     // build record
+  //     record.clear();
+  //     for (u32 column_idx : column_idxs) {
+  //       record.insert(record.end(), chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx]),
+  //                     chunk.column_parts[column_idx]->Data() + (i * columnSizes[column_idx] +
+  //                     columnSizes[column_idx]));
+  //     }
+  //     // call fn
+  //     tuples_scanned++;
+  //     if (!fn(std::span<u8>(), record)) {
+  //       // return if fn is false (similar to other scan)
+  //       if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
+  //       return;
+  //     }
+  //   }
+  //   // unload blobs for best performance
+  //   this->blob_->UnloadAllBlobs();
+  // }
+  // if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
 }
 
 /**

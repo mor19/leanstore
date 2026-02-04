@@ -145,31 +145,37 @@ template <template <typename> class AdapterType>
 auto TPCCWorkloadExtended<AdapterType>::ExecuteTransaction(Integer w_id) -> int {
   // TPC-C workload task
   auto rnd = UniformRand(1, 100);
+  int res;
   if (rnd <= 43) {
     this->DoPaymentRandom(w_id);
-    return 0;
+    res = 0;
+  } else {
+    rnd -= 43;
+    if (rnd <= 4) {
+      this->DoOrderStatusRandom(w_id);
+      res = 1;
+    } else {
+      rnd -= 4;
+      if (rnd <= 4) {
+        this->DoDeliveryRandom(w_id);
+        res = 2;
+      } else {
+        rnd -= 4;
+        if (rnd <= 4) {
+          this->DoStockLevelRandom(w_id);
+          res = 3;
+        } else {
+          Ensure(rnd - 4 <= 45);
+          this->DoNewOrderRandom(w_id);
+          res = 4;
+        }
+      }
+    }
   }
-  rnd -= 43;
-  if (rnd <= 4) {
-    this->DoOrderStatusRandom(w_id);
-    return 1;
-  }
-  rnd -= 4;
-  if (rnd <= 4) {
-    this->DoDeliveryRandom(w_id);
-    return 2;
-  }
-  rnd -= 4;
-  if (rnd <= 4) {
-    this->DoStockLevelRandom(w_id);
-    return 3;
-  }
-  Ensure(rnd - 4 <= 45);
-  this->DoNewOrderRandom(w_id);
-
   // long running query (adapted TPC-H Query 2)
   Query2();
-  return 4;
+
+  return res;
 }
 
 template struct TPCCWorkloadExtended<LeanStoreAdapter>;

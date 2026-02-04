@@ -16,7 +16,7 @@
 #include <vector>
 
 auto main(int argc, char **argv) -> int {
-  gflags::SetUsageMessage("Leanstore TPC-C Extended"); // Extended with adapted Query 2 from TPC-H
+  gflags::SetUsageMessage("Leanstore TPC-C Extended");  // Extended with adapted Query 2 from TPC-H
   gflags::ParseCommandLineFlags(&argc, &argv, true);
 
   tbb::global_control c(tbb::global_control::max_allowed_parallelism, FLAGS_worker_count);
@@ -114,4 +114,6 @@ auto main(int argc, char **argv) -> int {
   LOG_INFO("Space used: %.4f GB - WAL size: %.4f GB", db->AllocatedSize(), db->WALSize() - initial_wal_size);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
+  LOG_INFO("scan: %.4f tuples/s",
+           leanstore::statistics::total_scanned_tuples.load() / static_cast<double>(FLAGS_tpcc_exec_seconds));
 }

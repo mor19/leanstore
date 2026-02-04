@@ -70,7 +70,7 @@ DEFINE_bool(txn_collect_state_during_flush, true,
 /* BLOB */
 DEFINE_bool(blob_enable, true, "Whether to enable Blob functionalities");
 DEFINE_bool(blob_tail_extent, true, "Whether to enable Tail Extent or not");
-DEFINE_bool(blob_normal_buffer_pool, false,
+DEFINE_bool(blob_normal_buffer_pool, true, // default = false
             "Extra overheads to emulate normal buffer pool"
             "1. *IMPORTANT* PageAliasGuard(): malloc() and memcpy() all the extents"
             "2. *IMPORTANT* Extra hashtable lookup on Buffer's ToPtr & Read op"

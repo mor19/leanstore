@@ -74,16 +74,20 @@ TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
   std::vector<std::pair<int, __uint128_t>> data;
   Prepare<__uint128_t>(data, true, true, NO_RECORDS * 2);
 
-  std::this_thread::sleep_for(std::chrono::seconds(11));
+  std::this_thread::sleep_for(std::chrono::seconds(FLAGS_htap_expire_seconds + 1));
 
   columnrowstore_->ConvertHotDataToColdData();
+  txn_man_->CommitTransaction();
+  txn_man_->AddBarrierTransaction();
+  InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
+  LOG_INFO("cold tuples: %ld", columnrowstore_->CountColdEntries());
+  LOG_INFO("total tuples: %ld", columnrowstore_->CountEntries());
 
   for (auto &pair : data) {
     std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
     std::span payload{reinterpret_cast<u8 *>(&pair.second), sizeof(__uint128_t)};
-
     auto found = columnrowstore_->LookUp(key, [&payload](std::span<u8> data) {
       EXPECT_EQ(payload.size(), data.size());
       for (size_t idx = 0; idx < data.size(); idx++) { EXPECT_EQ(payload[idx], data[idx]); }
@@ -196,6 +200,38 @@ TEST_F(TestColumnRowStore, TreeScan) {
   //   EXPECT_TRUE(scan_result[pair.first] == pair.second);
   // }
   // EXPECT_EQ(scan_result.size(), data.size());
+}
+
+TEST_F(TestColumnRowStore, InsertAndCheckOrder) {
+  // fill tree
+  std::vector<std::pair<int, u64>> data;
+  columnrowstore_ = std::make_unique<ColumnRowStore>(buffer_.get(), blob_.get(), std::vector<uint32_t>{sizeof(u64)});
+  for (size_t idx = 0; idx < NO_RECORDS; idx++) {
+    data.emplace_back(static_cast<int>(__builtin_bswap32(idx)), static_cast<u64>(idx));
+  }
+
+  for (auto &pair : data) {
+    std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
+    std::span payload{reinterpret_cast<u8 *>(&pair.second), sizeof(u64)};
+    columnrowstore_->Insert(key, payload);
+  }
+  // check order
+  u64 last         = 0;
+  auto check_order = [&last](std::span<u8> key, std::span<u8> payload) -> bool {
+    (void)key;
+    u64 current;
+    std::memcpy(&current, payload.data(), sizeof(u64));
+    // int cur_key;
+    // std::memcpy(&cur_key, key.data(), sizeof(int));
+    // LOG_INFO("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
+    EXPECT_GE(current, last);
+    last = current;
+    return true;
+  };
+
+  int start_key = 0;
+  std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
+  columnrowstore_->ScanAscending(key, check_order);
 }
 
 }  // namespace leanstore::storage

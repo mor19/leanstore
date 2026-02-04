@@ -596,9 +596,12 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
   for (auto idx = 0; idx < node->header.count; idx++) {
     OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
     for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
-      // row id
-      u8 *tmpRowId = child.Ptr()->GetKey(entry_idx);
-      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowId, tmpRowId + sizeof(u64));
+      // row id (also copy prefix!)
+      u8 tmpRowIdBuffer[sizeof(u64)];
+      std::memcpy(tmpRowIdBuffer, child.Ptr()->GetPrefix(), child.Ptr()->header.prefix_len);
+      std::memcpy(tmpRowIdBuffer + child.Ptr()->header.prefix_len, child.Ptr()->GetKey(entry_idx),
+                  child.Ptr()->slots[entry_idx].key_length);
+      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
       // payload
       u8 *payloadData     = child.Ptr()->GetPayload(entry_idx).data();
       size_t recordOffset = 0;
@@ -614,9 +617,12 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
   {
     OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
     for (auto entry_idx = 0; entry_idx < rightmost_child.Ptr()->header.count; entry_idx++) {
-      // row id
-      u8 *tmpRowId = rightmost_child.Ptr()->GetKey(entry_idx);
-      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowId, tmpRowId + sizeof(u64));
+      // row id (also copy prefix!)
+      u8 tmpRowIdBuffer[sizeof(u64)];
+      std::memcpy(tmpRowIdBuffer, rightmost_child.Ptr()->GetPrefix(), rightmost_child.Ptr()->header.prefix_len);
+      std::memcpy(tmpRowIdBuffer + rightmost_child.Ptr()->header.prefix_len, rightmost_child.Ptr()->GetKey(entry_idx),
+                  rightmost_child.Ptr()->slots[entry_idx].key_length);
+      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
       // payload
       u8 *payloadData     = rightmost_child.Ptr()->GetPayload(entry_idx).data();
       size_t recordOffset = 0;
@@ -645,7 +651,9 @@ void ExtendedBTree::MoveHotDataToColdData() {
       if (!root->IsInner() || root->header.count == 0) { return; }
       time_t current_time;
       std::time(&current_time);
-      for (leng_t i = 0; i < root->header.count; i++) {
+      leng_t count = root->header.count;
+      for (leng_t i = 0; i < count; i++) {
+        OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_), meta);
         OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, root->GetChild(i));
         if (!child->IsInner()) { return; }
         // start iterating from root
@@ -659,18 +667,19 @@ void ExtendedBTree::MoveHotDataToColdData() {
 void ExtendedBTree::IterateLeafParents(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
                                        OptimisticGuard<BTreeNodeWithTimeStamp> &parent, time_t current_time) {
   if (!node->IsInner()) return;
-
+  OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
   for (leng_t i = 0; i < node->header.count; i++) {
     OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
 
     if (!child->IsInner()) {
       // leaf parent -> check time in rightmost child node
+      OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
       ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
       ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
-      OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
       if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
         // data is expired -> move to cold data
         RemoveInnerNode(std::move(parent_locked), std::move(node_locked));
+        throw sync::RestartException{};
       }
       return;
     } else {
@@ -679,12 +688,11 @@ void ExtendedBTree::IterateLeafParents(OptimisticGuard<BTreeNodeWithTimeStamp> &
   }
 
   // rightmost child
-  OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
   if (!child->IsInner()) {
     // leaf parent -> check time
+    OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
     ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
     ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
-    OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
     if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
       // data is expired -> move to cold data
       RemoveInnerNode(std::move(parent_locked), std::move(node_locked));

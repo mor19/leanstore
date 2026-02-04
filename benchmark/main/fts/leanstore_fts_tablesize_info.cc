@@ -15,7 +15,6 @@
 #include <thread>
 #include <vector>
 
-
 auto main(int argc, char **argv) -> int {
   gflags::SetUsageMessage("Leanstore FTS");
   gflags::ParseCommandLineFlags(&argc, &argv, true);

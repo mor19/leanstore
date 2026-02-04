@@ -70,4 +70,7 @@ auto main(int argc, char **argv) -> int {
   LOG_INFO("executed full query %d times on %d worker threads", FLAGS_fts_run_queries_count, FLAGS_worker_count);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
+  // TODO(moritz) get time counter!
+  LOG_INFO("scan: %.4f tuples/s",
+           leanstore::statistics::total_scanned_tuples.load() / static_cast<double>(FLAGS_htap_expire_seconds));
 }

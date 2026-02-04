@@ -217,6 +217,39 @@ TEST_F(TestExtendedBTree, ConcurrentInsertAndSearch) {
   for (auto &thread : threads) { thread.join(); }
 }
 
+TEST_F(TestExtendedBTree, InsertAndCheckOrder) {
+  // fill tree
+  std::vector<std::pair<int, u64>> data;
+  std::vector<uint32_t> columnSizes{sizeof(u64)};
+  tree_ = std::make_unique<ExtendedBTree>(buffer_.get(), nullptr, columnSizes);
+  for (size_t idx = 0; idx < NO_RECORDS; idx++) {
+    data.emplace_back(static_cast<int>(__builtin_bswap32(idx)), static_cast<u64>(idx));
+  }
+  Ensure(!tree_->IsNotEmpty());
+  for (auto &pair : data) {
+    std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
+    std::span payload{reinterpret_cast<u8 *>(&pair.second), sizeof(u64)};
+    tree_->Insert(key, payload);
+  }
+  // check order
+  u64 last         = 0;
+  auto check_order = [&last](std::span<u8> key, std::span<u8> payload) -> bool {
+    (void)key;
+    u64 current;
+    std::memcpy(&current, payload.data(), sizeof(u64));
+    // int cur_key;
+    // std::memcpy(&cur_key, key.data(), sizeof(int));
+    // LOG_INFO("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
+    EXPECT_GE(current, last);
+    last = current;
+    return true;
+  };
+
+  int start_key = 0;
+  std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
+  tree_->ScanAscending(key, check_order);
+}
+
 }  // namespace leanstore::storage
 
 auto main(int argc, char **argv) -> int {

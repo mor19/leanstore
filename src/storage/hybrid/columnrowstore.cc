@@ -7,6 +7,19 @@ namespace leanstore::storage {
 
 inline std::span<u8> U64ToSpanU8(u64 &u) { return {reinterpret_cast<u8 *>(&u), sizeof(u)}; }
 
+inline blob::BlobState *CopyBlobState(const blob::BlobState *blobState) {
+  auto blobStateSize   = blobState->MallocSize();
+  auto copiedBlobState = reinterpret_cast<blob::BlobState *>(std::malloc(blobStateSize));
+  std::memcpy(copiedBlobState, blobState, blobStateSize);
+  return copiedBlobState;
+}
+
+inline void ColumnRowStore::EvictBlob(const blob::BlobState *blobState) {
+  // for (auto &extent : blobState->extents) { buffer_->EvictExtent(extent.start_pid); }
+  // this->buffer_->EvictExtent(transaction::TransactionManager::active_txn.ToEvictedExtents().back());
+  this->blob_->UnloadAllBlobs();
+}
+
 /* constructor */
 ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager,
                                std::vector<u32> columnSizes, bool append_bias)
@@ -50,19 +63,22 @@ auto ColumnRowStore::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bo
     // binary search on remaining range
     const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
     while (lower < upper) {
-      auto mid      = ((upper - lower) / 2) + lower;
-      u64 mid_value = row_id_columns[mid];
-      if (mid_value > row_id) {
-        upper = mid;
-      } else if (mid_value < row_id) {
+      auto mid = lower + ((upper - lower) / 2);
+      auto cmp = std::memcmp(row_id_columns + mid, &row_id, sizeof(uint64_t));
+      if (cmp < 0) {
         lower = mid + 1;
+      } else if (cmp > 0) {
+        upper = mid;
       } else {
         idx = mid;
         break;
       }
     }
   });
-  if (idx == -1) { return false; }
+  if (idx == -1) {
+    this->blob_->UnloadAllBlobs();
+    return false;
+  }
   // load all payload columns
   std::vector<u8> result;
   // copy tuple value for each column
@@ -76,6 +92,7 @@ auto ColumnRowStore::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bo
                             }
                           });
   }
+  this->blob_->UnloadAllBlobs();
   // read
   read_cb(result);
   return idx != -1;  // should always be true
@@ -86,6 +103,8 @@ void ColumnRowStore::Insert(std::span<u8> key, std::span<const u8> payload) {
   assert((key.size() + payload.size()) <= BTreeNodeWithTimeStamp::MAX_RECORD_SIZE);
   // get new row id
   u64 row_id = next_row_id.fetch_add(1);
+  row_id     = __builtin_bswap64(row_id);  // swap for memcmp sort compability
+
   // inserted data is always hot data
   this->hot_data.Insert(U64ToSpanU8(row_id), payload);
   // insert row id into index
@@ -117,6 +136,7 @@ auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, cons
   if (func) { this->hot_data.LookUp(U64ToSpanU8(row_id), func); }
   // update = insert (without updating the row id of key) + delete old + update row-id index
   u64 new_row_id = next_row_id.fetch_add(1);
+  new_row_id     = __builtin_bswap64(new_row_id);  // swap for memcmp sort compability
   hot_data.Insert(U64ToSpanU8(new_row_id), payload);
   this->row_id_to_key_index.Insert(U64ToSpanU8(new_row_id), key);
   this->InternalRemove(row_id);
@@ -137,6 +157,7 @@ auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, F
   }
   // update = insert (without updating the row id of key) + delete old + update row-id index
   u64 new_row_id = next_row_id.fetch_add(1);
+  new_row_id     = __builtin_bswap64(new_row_id);  // swap for memcmp sort compability
   // apply fixed delta update to copy
   std::vector<u8> temp;
   this->hot_data.LookUp(U64ToSpanU8(row_id),
@@ -271,18 +292,19 @@ auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLa
   if (chunk == nullptr) { return false; }
   // find idx in row id column
   int idx = -1;
-  this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk](std::span<const uint8_t> data) {
+  this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &row_id](std::span<const uint8_t> data) {
     // find idx with binary search
     u32 lower = 0;             // inclusive
     u32 upper = chunk->count;  // exclusive
     // binary search on remaining range
+    const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
     while (lower < upper) {
-      auto mid = ((upper - lower) / 2) + lower;
-      auto ret = std::memcmp(data.data() + (lower << 3), data.data() + (upper << 3), 8);
-      if (ret < 0) {
-        upper = mid;
-      } else if (ret > 0) {
+      auto mid = lower + ((upper - lower) / 2);
+      auto cmp = std::memcmp(row_id_columns + mid, &row_id, sizeof(uint64_t));
+      if (cmp < 0) {
         lower = mid + 1;
+      } else if (cmp > 0) {
+        upper = mid;
       } else {
         idx = mid;
         break;
@@ -354,8 +376,9 @@ auto ColumnRowStore::InternalRemove(u64 row_id) -> bool {
 
 auto ColumnRowStore::FindChunkInColdData(u64 row_id) -> ColumnChunk * {
   // find the correct chunk with upper bound (first entry that is > row_id and then go one back)
-  auto iterator = std::upper_bound(cold_data.begin(), cold_data.end(), row_id,
-                                   [](u64 value, const ColumnChunk &chunk) { return value < chunk.minRowId; });
+  auto iterator = std::upper_bound(cold_data.begin(), cold_data.end(), row_id, [](u64 value, const ColumnChunk &chunk) {
+    return std::memcmp(&value, &chunk.minRowId, sizeof(u64)) < 0;
+  });
   if (iterator == cold_data.begin()) {
     // not found
     return nullptr;
@@ -375,21 +398,25 @@ void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vec
   std::memcpy(&newColumnData.minRowId, rowIds.data(), sizeof(u64));
   std::memcpy(&newColumnData.maxRowId, rowIds.data() + rowIds.size() - sizeof(u64), sizeof(u64));
   // store rowId column
-  newColumnData.idx_column = blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false);
+  newColumnData.idx_column = CopyBlobState(blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false));
+  EvictBlob(newColumnData.idx_column);
   // store keys from rowIds and remove them
   std::vector<u8> keys;
   // get keys and remove
-  for (size_t i = 0; i + sizeof(u64) <= rowIds.size(); i += sizeof(u64)) {
+  for (size_t i = 0; i < rowIds.size(); i += sizeof(u64)) {
     std::span<u8> id(rowIds.data() + i, sizeof(u64));
     row_id_to_key_index.LookUp(id, [&](std::span<u8> pl) { keys.insert(keys.end(), pl.begin(), pl.end()); });
     row_id_to_key_index.Remove(id);
   }
-  newColumnData.key_column     = blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false);
+  newColumnData.key_column     = CopyBlobState(blob_->AllocateBlob({keys.data(), keys.size()}, nullptr, false));
   newColumnData.totalSizeBytes = rowIds.size() + keys.size();
+  EvictBlob(newColumnData.key_column);
   // store columns
   newColumnData.column_parts.reserve(columnSizes.size());
   for (std::vector<u8> &column : data) {
-    newColumnData.column_parts.emplace_back(blob_->AllocateBlob({column.data(), column.size()}, nullptr, false));
+    newColumnData.column_parts.emplace_back(
+      CopyBlobState(blob_->AllocateBlob({column.data(), column.size()}, nullptr, false)));
+    EvictBlob(newColumnData.column_parts.back());
     newColumnData.totalSizeBytes += column.size();
   }
 }

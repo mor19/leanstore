@@ -15,6 +15,8 @@
 #include <thread>
 #include <vector>
 
+#include "storage/hybrid/columnrowstore.h"  // TODO(moritz) delete
+
 inline int GetRandomWarehouseId(uint32_t threadId) {
   // calculate the correct thread warehouse id
   if (FLAGS_worker_count >= FLAGS_fts_warehouse_count) {
@@ -61,6 +63,22 @@ auto main(int argc, char **argv) -> int {
 
   // move hot to cold data
   // TODO(moritz)
+  // TODO(moritz)delete
+  std::this_thread::sleep_for(std::chrono::seconds(FLAGS_htap_expire_seconds + 1));
+  db->worker_pool.ScheduleSyncJob(0, [&]() {
+    fts->InitializeThread();
+    db->StartTransaction();
+    for (auto &[type, ptr] : db->indexes) { ptr->ConvertHotDataToColdData(); }
+    db->CommitTransaction();
+  });
+  db->worker_pool.ScheduleSyncJob(0, [&]() {
+    fts->InitializeThread();
+    // db->StartTransaction();
+    db->transaction_manager->AddBarrierTransaction();
+    // db->CommitTransaction();
+  });
+  db->worker_pool.JoinAll();
+  // TODO(moritz) end elete
 
   // run small operation (GetOrderTotalPrice(...))
   db->StartProfilingThread();

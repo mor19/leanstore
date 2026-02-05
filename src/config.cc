@@ -13,11 +13,11 @@ DEFINE_bool(worker_pin_thread, false, "Pin worker to a specific thread");
 DEFINE_uint32(txn_rate, 0, "Limit transaction rate in second for latency checking -- Disabled by default");
 // -----------------------------------------------------------------------------------
 /* Buffer manager */
-DEFINE_uint64(bm_virtual_gb, 16, "Size of virtual memory in GB"); // default 1
-DEFINE_uint64(bm_physical_gb, 4, "Size of physical memory in GB"); // default 4
-DEFINE_uint64(bm_alias_block_mb, 4096, "Size of worker-local aliasing area in MB"); // default 1024
-DEFINE_uint64(bm_evict_batch_size, 256, "Expected number of pages to be evicted during each eviction"); // default 64
-DEFINE_uint32(bm_aio_qd, 256, "Maximum number of concurrent I/O processed by bm's io_uring"); // default 64
+DEFINE_uint64(bm_virtual_gb, 8, "Size of virtual memory in GB"); // default 4
+DEFINE_uint64(bm_physical_gb, 2, "Size of physical memory in GB"); // default 1
+DEFINE_uint64(bm_alias_block_mb, 2048, "Size of worker-local aliasing area in MB"); // default 1024
+DEFINE_uint64(bm_evict_batch_size, 128, "Expected number of pages to be evicted during each eviction"); // default 64
+DEFINE_uint32(bm_aio_qd, 128, "Maximum number of concurrent I/O processed by bm's io_uring"); // default 64
 DEFINE_bool(bm_enable_fair_eviction, true,
             "Whether to use fair extent eviction policy or not"
             "Fair eviction policy: Large extents are more likely to be evicted than small extents/pages");
@@ -26,7 +26,7 @@ DEFINE_bool(bm_enable_fair_eviction, true,
 DEFINE_bool(wal_enable, true, "Whether to enable WAL logging or not");
 DEFINE_bool(wal_enable_rfa, true, "Whether to enable Remote-Flush-Avoidance or not");
 DEFINE_bool(wal_debug, false, "Enable debugging for WAL ops");
-DEFINE_bool(wal_fsync, true, "Force FSync for WAL");
+DEFINE_bool(wal_fsync, false, "Force FSync for WAL");
 DEFINE_uint64(wal_buffer_size_mb, 10, "Size of WAL log buffer in MB");
 
 /* Configuration for commit protocols */

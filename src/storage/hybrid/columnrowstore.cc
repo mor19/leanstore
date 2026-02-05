@@ -14,13 +14,6 @@ inline blob::BlobState *CopyBlobState(const blob::BlobState *blobState) {
   return copiedBlobState;
 }
 
-// TODO(moritz): evict needed?
-inline void ColumnRowStore::EvictBlob(const blob::BlobState *blobState) {
-  // for (auto &extent : blobState->extents) { buffer_->EvictExtent(extent.start_pid); }
-  // this->buffer_->EvictExtent(transaction::TransactionManager::active_txn.ToEvictedExtents().back());
-  this->blob_->UnloadAllBlobs();
-}
-
 /* constructor */
 ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager,
                                std::vector<u32> columnSizes, bool append_bias)
@@ -494,15 +487,13 @@ void ColumnRowStore::StoreColdData(std::vector<u8> &rowIds, std::vector<std::vec
   std::memcpy(&newColumnData.minRowId, rowIds.data(), sizeof(u64));
   std::memcpy(&newColumnData.maxRowId, rowIds.data() + rowIds.size() - sizeof(u64), sizeof(u64));
   // store rowId column
-  newColumnData.idx_column = CopyBlobState(blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false));
-  EvictBlob(newColumnData.idx_column);
+  newColumnData.idx_column     = CopyBlobState(blob_->AllocateBlob({rowIds.data(), rowIds.size()}, nullptr, false));
   newColumnData.totalSizeBytes = rowIds.size();
   // store columns
   newColumnData.column_parts.reserve(columnSizes.size());
   for (std::vector<u8> &column : data) {
     newColumnData.column_parts.emplace_back(
       CopyBlobState(blob_->AllocateBlob({column.data(), column.size()}, nullptr, false)));
-    EvictBlob(newColumnData.column_parts.back());
     newColumnData.totalSizeBytes += column.size();
   }
 }

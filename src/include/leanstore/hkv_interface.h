@@ -17,6 +17,7 @@ class HKVInterface : public KVInterface {
   // -------------------------------------------------------------------------------------
   virtual void ScanOptimized(std::span<u8> key, const std::unordered_set<u32> &column_idxs, const AccessRecordFunc &fn,
                              const bool ascending) = 0;
+  virtual void ConvertHotDataToColdData()          = 0;
 };
 
 }  // namespace leanstore

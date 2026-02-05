@@ -49,7 +49,7 @@ class ColumnRowStore : public HKVInterface {
   auto SizeInMB() -> float override;
   auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
     -> bool override;
-  void ConvertHotDataToColdData();
+  void ConvertHotDataToColdData() override;
   auto CountColdEntries() -> u64;
 
   // -------------------------------------------------------------------------------------

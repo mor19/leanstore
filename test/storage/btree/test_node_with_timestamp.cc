@@ -5,7 +5,6 @@
 
 #include "fmt/ranges.h"
 #include "gtest/gtest.h"
-#include "share_headers/logger.h"
 
 #include <cassert>
 #include <cstring>
@@ -32,7 +31,8 @@ class TestBTreeNodeWithTimeStamp : public ::testing::Test {
   }
 
   template <typename value_t>
-  void PrepareData(storage::BTreeNodeWithTimeStamp *node, std::vector<std::pair<int, value_t>> &data, bool get_permutation = false) {
+  void PrepareData(storage::BTreeNodeWithTimeStamp *node, std::vector<std::pair<int, value_t>> &data,
+                   bool get_permutation = false) {
     for (size_t idx = 0; idx < NO_RECORDS; idx++) {
       auto value = (node->IsInner()) ? idx : idx * 100;
       data.emplace_back(idx + 1, static_cast<value_t>(value));
@@ -48,9 +48,10 @@ class TestBTreeNodeWithTimeStamp : public ::testing::Test {
   }
 
   template <typename value_t>
-  auto PrepareSmallTree(storage::BTreeNodeWithTimeStamp *parent, storage::BTreeNodeWithTimeStamp *left, storage::BTreeNodeWithTimeStamp *right,
-                        std::vector<std::pair<int, value_t>> &data,
-                        std::unordered_map<storage::BTreeNodeWithTimeStamp *, pageid_t> &pid_map) -> storage::SeparatorInfo {
+  auto PrepareSmallTree(storage::BTreeNodeWithTimeStamp *parent, storage::BTreeNodeWithTimeStamp *left,
+                        storage::BTreeNodeWithTimeStamp *right, std::vector<std::pair<int, value_t>> &data,
+                        std::unordered_map<storage::BTreeNodeWithTimeStamp *, pageid_t> &pid_map)
+    -> storage::SeparatorInfo {
     pid_map[parent] = 1;
     pid_map[left]   = 2;
     pid_map[right]  = 3;
@@ -61,10 +62,10 @@ class TestBTreeNodeWithTimeStamp : public ::testing::Test {
 
     // Prepare node data
     PrepareData<value_t>(left, data, true);
-    LOG_DEBUG("Original data: '%s'", left->ToString().c_str());
+    spdlog::debug("Original data: '%s'", left->ToString().c_str());
 
     // Now split node to new_leaf
-    auto sep_info = left->FindSeparator(false, cmp_);
+    auto sep_info = left->FindSeparator(cmp_);
     assert(parent->HasSpaceForKV(sep_info.len, sizeof(pageid_t)));
     left->GetSeparatorKey(separator_key_, sep_info);
     left->SplitNode(parent, right, pid_map[left], pid_map[right], sep_info.slot, {separator_key_, sep_info.len}, cmp_);
@@ -119,9 +120,9 @@ TEST_F(TestBTreeNodeWithTimeStamp, NormalOperation) {
   auto clone = std::make_unique<storage::BTreeNodeWithTimeStamp>(true);
   storage::BTreeNodeWithTimeStamp::CopyNodeContent(clone.get(), node);
   for (size_t idx = 0; idx < storage::BTreeNodeHeaderWithTimestamp::HINT_COUNT; idx++) {
-    LOG_DEBUG("Clone's Hint[%ld]: %s - Original Hint[%ld]: %s", idx,
-              fmt::format("{}", clone->header.hints[idx]).c_str(), idx,
-              fmt::format("{}", node->header.hints[idx]).c_str());
+    spdlog::debug("Clone's Hint[%ld]: %s - Original Hint[%ld]: %s", idx,
+                  fmt::format("{}", clone->header.hints[idx]).c_str(), idx,
+                  fmt::format("{}", node->header.hints[idx]).c_str());
     EXPECT_EQ(std::memcmp(clone->header.hints[idx].data(), node->header.hints[idx].data(), 4), 0);
   }
 
@@ -174,16 +175,17 @@ TEST_F(TestBTreeNodeWithTimeStamp, NormalOperationWithPrefix) {
 
     // Search Hint test
     ASSERT_GT(node->header.prefix_len, 0);
-    auto key_head =
-      storage::BTreeNodeWithTimeStamp::GetHead(pair.first.data() + node->header.prefix_len, key.size() - node->header.prefix_len);
-    leng_t lower = 0;
-    leng_t upper = node->header.count;
+    auto key_head = storage::BTreeNodeWithTimeStamp::GetHead(pair.first.data() + node->header.prefix_len,
+                                                             key.size() - node->header.prefix_len);
+    leng_t lower  = 0;
+    leng_t upper  = node->header.count;
     node->SearchHint(key_head, lower, upper);
 
     // Search record
     auto slot_id = node->LowerBound(key, exact_found, cmp_);
-    LOG_DEBUG("Key head %s", fmt::format("{}", key_head).c_str());
-    LOG_DEBUG("Lower %u - upper %u - slot_id %d - key %s", lower, upper, slot_id, node->KeyToString(slot_id).c_str());
+    spdlog::debug("Key head %s", fmt::format("{}", key_head).c_str());
+    spdlog::debug("Lower %u - upper %u - slot_id %d - key %s", lower, upper, slot_id,
+                  node->KeyToString(slot_id).c_str());
     EXPECT_TRUE(exact_found);
     ASSERT_TRUE((lower <= slot_id) && (slot_id <= upper));
     u8string queried_key(key.size(), 0);
@@ -195,13 +197,13 @@ TEST_F(TestBTreeNodeWithTimeStamp, NormalOperationWithPrefix) {
   }
 
   // Try clone and check hints
-  LOG_DEBUG("Node: %s", node->ToString().c_str());
+  spdlog::debug("Node: %s", node->ToString().c_str());
   auto clone = std::make_unique<storage::BTreeNodeWithTimeStamp>(true);
   storage::BTreeNodeWithTimeStamp::CopyNodeContent(clone.get(), node);
   for (size_t idx = 0; idx < storage::BTreeNodeHeaderWithTimestamp::HINT_COUNT; idx++) {
-    LOG_DEBUG("Clone's Hint[%ld]: %s - Original Hint[%ld]: %s", idx,
-              fmt::format("{}", clone->header.hints[idx]).c_str(), idx,
-              fmt::format("{}", node->header.hints[idx]).c_str());
+    spdlog::debug("Clone's Hint[%ld]: %s - Original Hint[%ld]: %s", idx,
+                  fmt::format("{}", clone->header.hints[idx]).c_str(), idx,
+                  fmt::format("{}", node->header.hints[idx]).c_str());
     EXPECT_EQ(std::memcmp(clone->header.hints[idx].data(), node->header.hints[idx].data(), 4), 0);
   }
 
@@ -210,7 +212,7 @@ TEST_F(TestBTreeNodeWithTimeStamp, NormalOperationWithPrefix) {
     std::span key{reinterpret_cast<u8 *>(pair.first.data()), pair.first.size()};
     EXPECT_TRUE(node->RemoveKey(key, cmp_));
     EXPECT_FALSE(node->RemoveKey(key, cmp_));
-    LOG_DEBUG("Node: %s", node->ToString().c_str());
+    spdlog::debug("Node: %s", node->ToString().c_str());
   }
 }
 
@@ -225,7 +227,7 @@ TEST_F(TestBTreeNodeWithTimeStamp, TestCopyRange) {
   // Clone ops
   node->CopyKeyValueRange(other.get(), 0, 0, node->header.count);
   EXPECT_EQ(node->header.count, other->header.count);
-  LOG_DEBUG("node count %u - other count %u", node->header.count, other->header.count);
+  spdlog::debug("node count %u - other count %u", node->header.count, other->header.count);
   for (size_t idx = 0; idx < node->header.count; idx++) {
     EXPECT_EQ(node->slots[idx].offset, other->slots[idx].offset);
     EXPECT_EQ(node->slots[idx].key_length, other->slots[idx].key_length);
@@ -253,12 +255,12 @@ TEST_F(TestBTreeNodeWithTimeStamp, TestSplit) {
   EXPECT_EQ(parent->header.right_most_child, pid_map[new_leaf.get()]);
   EXPECT_EQ(parent->GetChild(0), pid_map[node]);
 
-  LOG_DEBUG("Parent: %s", parent->ToString().c_str());
-  LOG_DEBUG("Left: %s", node->ToString().c_str());
-  LOG_DEBUG("Right: %s", new_leaf->ToString().c_str());
+  spdlog::debug("Parent: %s", parent->ToString().c_str());
+  spdlog::debug("Left: %s", node->ToString().c_str());
+  spdlog::debug("Right: %s", new_leaf->ToString().c_str());
 
   EXPECT_LE(node->header.count, new_leaf->header.count);
-  LOG_DEBUG("Node count %u, new leaf count %u", node->header.count, new_leaf->header.count);
+  spdlog::debug("Node count %u, new leaf count %u", node->header.count, new_leaf->header.count);
   EXPECT_LE(sep_info.len, node->header.prefix_len + node->slots[node->header.count - 1].key_length);
 
   u8 last_key[node->header.prefix_len + node->slots[node->header.count - 1].key_length];
@@ -282,9 +284,9 @@ TEST_F(TestBTreeNodeWithTimeStamp, TestSplitInnerNodes) {
   EXPECT_EQ(parent->GetChild(0), pid_map[left]);
   EXPECT_EQ(left->header.right_most_child, NO_RECORDS / 2);
 
-  LOG_DEBUG("Parent: %s", parent->ToString().c_str());
-  LOG_DEBUG("Left: %s", left->ToString().c_str());
-  LOG_DEBUG("Right: %s", right->ToString().c_str());
+  spdlog::debug("Parent: %s", parent->ToString().c_str());
+  spdlog::debug("Left: %s", left->ToString().c_str());
+  spdlog::debug("Right: %s", right->ToString().c_str());
   EXPECT_LE(sep_info.len, left->header.prefix_len + left->slots[left->header.count - 1].key_length);
 
   u8 parent_key[parent->header.prefix_len + parent->slots[parent->header.count - 1].key_length];
@@ -349,10 +351,10 @@ TEST_F(TestBTreeNodeWithTimeStamp, TestMergeInnerNodes) {
   EXPECT_EQ(parent->GetChild(0), pid_map[left]);
   EXPECT_EQ(left->header.right_most_child, NO_RECORDS / 2);
 
-  LOG_DEBUG("Before merging");
-  LOG_DEBUG("Parent: %s", parent->ToString().c_str());
-  LOG_DEBUG("Left: %s", left->ToString().c_str());
-  LOG_DEBUG("Right: %s", right->ToString().c_str());
+  spdlog::debug("Before merging");
+  spdlog::debug("Parent: %s", parent->ToString().c_str());
+  spdlog::debug("Left: %s", left->ToString().c_str());
+  spdlog::debug("Right: %s", right->ToString().c_str());
 
   // Now merge left & right into one
   auto success = left->MergeNodes(0, parent.get(), right.get(), cmp_);
@@ -361,10 +363,10 @@ TEST_F(TestBTreeNodeWithTimeStamp, TestMergeInnerNodes) {
   EXPECT_EQ(parent->header.right_most_child, pid_map[right.get()]);
   EXPECT_EQ(right->header.count, NO_RECORDS);
 
-  LOG_DEBUG("After merging");
-  LOG_DEBUG("Parent: %s", parent->ToString().c_str());
-  LOG_DEBUG("Left: %s", left->ToString().c_str());
-  LOG_DEBUG("Right: %s", right->ToString().c_str());
+  spdlog::debug("After merging");
+  spdlog::debug("Parent: %s", parent->ToString().c_str());
+  spdlog::debug("Left: %s", left->ToString().c_str());
+  spdlog::debug("Right: %s", right->ToString().c_str());
 
   // Validate records in Right node
   for (auto &pair : data) {

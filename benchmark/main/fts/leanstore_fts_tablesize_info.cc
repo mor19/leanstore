@@ -25,7 +25,6 @@ auto main(int argc, char **argv) -> int {
   PerfEvent e;
   PerfController ctrl;
   std::atomic<bool> keep_running(true);
-  leanstore::RegisterSEGFAULTHandler();
 
   // Initialize LeanStore
   auto db = std::make_unique<leanstore::LeanStore>();
@@ -34,22 +33,22 @@ auto main(int argc, char **argv) -> int {
 
   // TPC-C loader
   for (Integer w_id = 1; w_id <= static_cast<Integer>(FLAGS_fts_warehouse_count); w_id++) {
-    LOG_DEBUG("Prepare for warehouse %d", w_id);
+    spdlog::debug("Prepare for warehouse %d", w_id);
     db->worker_pool.ScheduleAsyncJob(w_id % FLAGS_worker_count, [&, w_id]() {
       fts->InitializeThread();
       db->StartTransaction();
       fts->LoadOrderLineForWarehouse(w_id);
       db->CommitTransaction();
     });
-    LOG_DEBUG("Prepare warehouse %d successfully", w_id);
+    spdlog::debug("Prepare warehouse %d successfully", w_id);
   }
   db->worker_pool.JoinAll();
-  LOG_INFO("Space used: %.4f GB", db->AllocatedSize());
+  spdlog::info("Space used: %.4f GB", db->AllocatedSize());
 
   // get table sizes
   db->worker_pool.ScheduleSyncJob(0, [&]() {
     db->StartTransaction();
-    for (auto &[key, value] : db->indexes) { LOG_INFO("%-24s : %-8ld", key.name(), value->CountEntries()); }
+    for (auto &[key, value] : db->indexes) { spdlog::info("%-24s : %-8ld", key.name(), value->CountEntries()); }
     db->CommitTransaction();
   });
   db->worker_pool.JoinAll();

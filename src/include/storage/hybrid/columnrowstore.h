@@ -27,7 +27,8 @@ namespace leanstore::storage {
 class ColumnRowStore : public HKVInterface {
  public:
   explicit ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager,
-                          std::vector<u32> columnSizes, bool append_bias = false);
+                          recovery::RecoveryManager *recovery, std::vector<u32> columnSizes, u32 tree_slot_idx,
+                          u32 tree_slot_hot_data);
   ~ColumnRowStore() override = default;
 
   /* config*/
@@ -61,7 +62,6 @@ class ColumnRowStore : public HKVInterface {
   // TODO(moritz)
   bool InternalRemove(u64 row_id);
   ColumnChunk *FindChunkInColdData(u64 row_id);
-  inline void EvictBlob(const blob::BlobState *blobState);
 
   /* Core properties */
   buffer::BufferManager *buffer_;

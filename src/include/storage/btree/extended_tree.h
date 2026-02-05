@@ -24,9 +24,8 @@ class ColumnRowStore;
 
 class ExtendedBTree : public KVInterface {
  public:
-
-  explicit ExtendedBTree(buffer::BufferManager *buffer_pool, ColumnRowStore *column_row_store,
-                         std::vector<u32> &columnSizes, bool append_bias = false);
+  explicit ExtendedBTree(buffer::BufferManager *buffer_pool, recovery::RecoveryManager *recovery,
+                         ColumnRowStore *column_row_store, std::vector<u32> &columnSizes, u32 tree_slot);
   ~ExtendedBTree() override = default;
 
   /* ExtendedBTree config*/
@@ -77,12 +76,31 @@ class ExtendedBTree : public KVInterface {
                 sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&right, leng_t left_pos);
   void EnsureUnderfullInnersForMerge(BTreeNodeWithTimeStamp *to_merge);
 
+  /* Instant recovery */
+  inline void InstantRecovery(pageid_t pid) {
+    if (FLAGS_wal_enable_recovery && !recovery_->HasRecovered(pid)) [[unlikely]] {
+      sync::ExclusiveGuard<BTreeNode> page(buffer_, pid);
+      // While waiting for the page latch, the page may already be recovered by another worker
+      if (!recovery_->HasRecovered(pid)) { recovery_->PerPageRedo(page, pid); }
+    }
+  }
+
+  /* Access record utility for scan */
+  template <typename PageGuard>
+  inline auto AccessRecord(PageGuard &node, u64 pos, const AccessRecordFunc &fn) -> bool {
+    u64 key_len = node->header.prefix_len + node->slots[pos].key_length;
+    u8 key[key_len];
+    std::memcpy(key, node->GetPrefix(), node->header.prefix_len);
+    std::memcpy(key + node->header.prefix_len, node->GetKey(pos), node->slots[pos].key_length);
+    return fn({key, key_len}, node->GetPayload(pos));
+  }
+
   /* Core properties */
   buffer::BufferManager *buffer_;
-  leng_t metadata_slotid_;
+  recovery::RecoveryManager *recovery_;
   ColumnRowStore *column_row_store_;
   std::vector<u32> &column_sizes_;
-  std::atomic<bool> append_bias_;
+  leng_t metadata_slotid_;
 
   /* Comparison properties */
   ComparisonLambda cmp_lambda_{ComparisonOperator::MEMCMP, std::memcmp};

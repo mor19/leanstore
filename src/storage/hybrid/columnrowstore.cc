@@ -16,13 +16,14 @@ inline blob::BlobState *CopyBlobState(const blob::BlobState *blobState) {
 
 /* constructor */
 ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobManager *blob_manager,
-                               std::vector<u32> columnSizes, bool append_bias)
+                               recovery::RecoveryManager *recovery, std::vector<u32> columnSizes, u32 tree_slot_idx,
+                               u32 tree_slot_hot_data)
     : buffer_(buffer_pool),
       blob_(blob_manager),
       next_row_id(0),
-      row_id_index(buffer_pool, true),
+      row_id_index(buffer_pool, recovery, tree_slot_idx),
       columnSizes(columnSizes),
-      hot_data(buffer_pool, this, this->columnSizes, append_bias),
+      hot_data(buffer_pool, recovery, this, this->columnSizes, tree_slot_hot_data),
       cold_data(),
       allColumnIndices() {
   // generate vector with all column indices
@@ -365,8 +366,8 @@ auto ColumnRowStore::CountColdEntries() -> u64 {
 
 auto ColumnRowStore::SizeInMB() -> float { return CountPages() * static_cast<float>(PAGE_SIZE) / MB; }
 
-auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
-  -> bool {
+auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp,
+                                const AccessPayloadFunc &read_cb) -> bool {
   // get row id
   u64 row_id;
   if (!row_id_index.LookUpBlob(blob_key, cmp,

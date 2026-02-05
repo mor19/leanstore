@@ -53,7 +53,7 @@ auto LeanStoreAdapter<RecordBase>::LookUp(const typename RecordBase::Key &r_key,
   u8 key[RecordBase::MaxFoldLength()];
   auto len = RecordBase::FoldKey(key, r_key);
   bool success =
-    tree_->LookUp({key, len}, [&](std::span<const u8> pl) { fn(*reinterpret_cast<const RecordBase *>(pl.data())); });
+    tree_->LookUp({key, len}, [&](std::span<u8> pl) { fn(*reinterpret_cast<const RecordBase *>(pl.data())); });
   return success;
 }
 
@@ -181,10 +181,10 @@ void LeanStoreAdapter<RecordBase>::RemoveBlob(u8 *blob_handler) {
 
 template <class RecordBase>
 auto LeanStoreAdapter<RecordBase>::LookUpBlob(std::span<u8> blob_payload,
-                                              const typename Adapter<RecordBase>::AccessPayloadFunc &fn) -> bool {
+                                              const typename Adapter<RecordBase>::AccessRecordFunc &fn) -> bool {
   auto success =
     tree_->LookUpBlob(blob_payload, db_->RetrieveComparisonFunc(leanstore::ComparisonOperator::BLOB_LOOKUP),
-                      [&](std::span<const u8> payload) { fn(*reinterpret_cast<const RecordBase *>(payload.data())); });
+                      [&](std::span<u8> payload) { fn(*reinterpret_cast<const RecordBase *>(payload.data())); });
   return success;
 }
 

@@ -136,7 +136,7 @@ void TPCCWorkloadExtended<AdapterType>::LoadSupplier() {
       supp_stock_map[w * i % 10000].push_back(std::make_pair(w, i));
     }
   }
-  LOG_DEBUG("Load TPC-C Extended tables successfully");
+  spdlog::debug("Load TPC-C Extended tables successfully");
 }
 
 // -------------------------------------------------------------------------------------

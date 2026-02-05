@@ -4,7 +4,6 @@
 #include "common/utils.h"
 #include "leanstore/env.h"
 #include "storage/blob/blob_manager.h"
-#include "storage/btree/tree.h"
 #include "storage/hybrid/columnrowstore.h"
 
 #include <cstring>
@@ -18,29 +17,26 @@ using leanstore::sync::ExclusiveGuard;
 using leanstore::sync::OptimisticGuard;
 using leanstore::sync::SharedGuard;
 
-#define ACCESS_RECORD_MACRO(node, pos, fn)                                                                 \
-  ({                                                                                                       \
-    size_t key_len = (node)->header.prefix_len + (node)->slots[pos].key_length;                            \
-    u8 key[key_len];                                                                                       \
-    auto node_ptr = *((node).Ptr());                                                                       \
-    std::memcpy((key), node_ptr.GetPrefix(), node_ptr.header.prefix_len);                                  \
-    std::memcpy((key) + node_ptr.header.prefix_len, node_ptr.GetKey(pos), node_ptr.slots[pos].key_length); \
-    (fn)({(key), (key_len)}, node_ptr.GetPayload(pos));                                                    \
-  })
-
 namespace leanstore::storage {
 
-ExtendedBTree::ExtendedBTree(buffer::BufferManager *buffer_pool, ColumnRowStore *column_row_store,
-                             std::vector<u32> &columnSizes, bool append_bias)
-    : buffer_(buffer_pool), column_row_store_(column_row_store), column_sizes_(columnSizes), append_bias_(append_bias) {
-  ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
-  ExclusiveGuard<BTreeNodeWithTimeStamp> root_page(buffer_, buffer_->AllocPage());
-  new (root_page.Ptr()) storage::BTreeNodeWithTimeStamp(true);
-  metadata_slotid_                   = BTree::btree_slot_counter++;
-  meta_page->roots[metadata_slotid_] = root_page.PageID();
-  // -------------------------------------------------------------------------------------
-  meta_page.AdvanceGSN();
-  root_page.AdvanceGSN();
+ExtendedBTree::ExtendedBTree(buffer::BufferManager *buffer_pool, recovery::RecoveryManager *recovery,
+                             ColumnRowStore *column_row_store, std::vector<u32> &columnSizes, u32 tree_slot)
+    : buffer_(buffer_pool),
+      recovery_(recovery),
+      column_row_store_(column_row_store),
+      column_sizes_(columnSizes),
+      metadata_slotid_(tree_slot) {
+  if (!FLAGS_wal_enable_recovery) {
+    ExclusiveGuard<MetadataPage> meta_page(buffer_, METADATA_PAGE_ID);
+    ExclusiveGuard<BTreeNodeWithTimeStamp> root_page(buffer_, buffer_->AllocPage());
+    new (root_page.Ptr()) storage::BTreeNodeWithTimeStamp(true);
+    meta_page->roots[metadata_slotid_] = root_page.PageID();
+    // -------------------------------------------------------------------------------------
+    if (FLAGS_wal_enable) {
+      GenerateWALNewRoot(meta_page, metadata_slotid_, root_page.PageID());
+      GenerateWALFreshPage(root_page, true);
+    }
+  }
 }
 
 void ExtendedBTree::SetComparisonOperator(ComparisonLambda cmp_op) { cmp_lambda_ = cmp_op; }
@@ -52,9 +48,12 @@ auto ExtendedBTree::IterateAllNodes(OptimisticGuard<BTreeNodeWithTimeStamp> &nod
 
   u64 res = inner_fn(*(node.Ptr()));
   for (auto idx = 0; idx < node->header.count; idx++) {
-    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
+    auto child_pid = node->GetChild(idx);
+    InstantRecovery(child_pid);
+    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, child_pid);
     res += IterateAllNodes(child, inner_fn, leaf_fn);
   }
+  InstantRecovery(node->header.right_most_child);
   OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
   res += IterateAllNodes(child, inner_fn, leaf_fn);
   return res;
@@ -84,10 +83,14 @@ auto ExtendedBTree::IterateUntils(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
 // -------------------------------------------------------------------------------------
 auto ExtendedBTree::FindLeafOptimistic(std::span<u8> key) -> OptimisticGuard<BTreeNodeWithTimeStamp> {
   OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  auto root_pid = meta->GetRoot(metadata_slotid_);
+  InstantRecovery(root_pid);
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, root_pid, meta);
 
   while (node->IsInner()) {
-    node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, node->FindChild(key, cmp_lambda_), node);
+    auto next_pid = node->FindChild(key, cmp_lambda_);
+    InstantRecovery(next_pid);
+    node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, next_pid, node);
   }
   return node;
 }
@@ -96,12 +99,15 @@ auto ExtendedBTree::FindLeafShared(std::span<u8> key) -> SharedGuard<BTreeNodeWi
   while (true) {
     try {
       OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+      auto root_pid = meta->GetRoot(metadata_slotid_);
+      InstantRecovery(root_pid);
+      OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, root_pid, meta);
 
       while (node->IsInner()) {
-        node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, node->FindChild(key, cmp_lambda_), node);
+        auto next_pid = node->FindChild(key, cmp_lambda_);
+        InstantRecovery(next_pid);
+        node = OptimisticGuard<BTreeNodeWithTimeStamp>(buffer_, next_pid, node);
       }
-
       return SharedGuard<BTreeNodeWithTimeStamp>(std::move(node));
     } catch (const sync::RestartException &) {}
   }
@@ -117,18 +123,17 @@ void ExtendedBTree::TrySplit(ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
     new (new_root.Ptr()) storage::BTreeNodeWithTimeStamp(false);
     new_root->header.right_most_child = node.PageID();
     if (FLAGS_wal_enable) {
-      new_root.PrepareWalEntry<WALNewRoot>(0);
-      new_root.SubmitActiveWalEntry();
+      GenerateWALNewRoot(parent, metadata_slotid_, new_root.PageID());
+      GenerateWALFreshPage(new_root, false, node.PageID());
     }
     // Update root pid
     meta_p->roots[metadata_slotid_] = new_root.PageID();
     parent                          = std::move(new_root);
-    parent.AdvanceGSN();
   }
 
   // split & retrieve new separator
   assert(parent->IsInner());
-  auto sep_info = node->FindSeparator(append_bias_.load(), cmp_lambda_);
+  auto sep_info = node->FindSeparator(cmp_lambda_);
   u8 sep_key[sep_info.len];
   node->GetSeparatorKey(sep_key, sep_info);
 
@@ -136,7 +141,6 @@ void ExtendedBTree::TrySplit(ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
     // alloc a new child page
     ExclusiveGuard<BTreeNodeWithTimeStamp> new_child(buffer_, buffer_->AllocPage());
     new (new_child.Ptr()) storage::BTreeNodeWithTimeStamp(!node->IsInner());
-    // time update not needed because it is automatically done in the constructor if this is a leaf
     // now split the node
     node->SplitNode(parent.Ptr(), new_child.Ptr(), node.PageID(), new_child.PageID(), sep_info.slot,
                     {sep_key, sep_info.len}, cmp_lambda_);
@@ -144,21 +148,30 @@ void ExtendedBTree::TrySplit(ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
     // -------------------------------------------------------------------------------------
     if (FLAGS_wal_enable) {
       // WAL new node
-      new_child.PrepareWalEntry<WALInitPage>(0);
-      new_child.SubmitActiveWalEntry();
+      GenerateWALNewPage(new_child);
+      // WAL separator to parent
+      {
+        auto &entry      = parent.PrepareWalEntry<WALInsertSep>(sep_info.len);
+        entry.left_pid   = node.PageID();
+        entry.right_pid  = new_child.PageID();
+        entry.sep_length = sep_info.len;
+        std::memcpy(entry.sep_key, sep_key, sep_info.len);
+        parent.SubmitActiveWalEntry();
+      }
       // WAL logical split
-      //  all parent, node, and new_child share the same local log buffer,
-      //  hence we don't need to push this wal entry using parent's and new_child's
-      auto &entry = node.PrepareWalEntry<WALLogicalSplit>(0);
-      std::tie(entry.parent_pid, entry.left_pid, entry.right_pid, entry.sep_slot) =
-        std::make_tuple(parent.PageID(), node.PageID(), new_child.PageID(), sep_info.slot);
-      node.SubmitActiveWalEntry();
+      {
+        auto &entry = node.PrepareWalEntry<WALLogicalSplit>(0);
+        entry.sep   = sep_info;
+        if (!node->IsInner()) { entry.next_leaf_node = node->header.next_leaf_node; }
+        node.SubmitActiveWalEntry();
+      }
     }
     return;
   }
 
   // must split parent to make space for separator, restart from root to do this
   node.Unlock();
+
   EnsureSpaceForSplit(parent.UnlockAndGetPtr(), {sep_key, sep_info.len});
 }
 
@@ -192,19 +205,23 @@ void ExtendedBTree::EnsureSpaceForSplit(BTreeNodeWithTimeStamp *to_split, std::s
   }
 }
 
+/** Try merging `left` into `right` node */
 void ExtendedBTree::TryMerge(ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
                              ExclusiveGuard<BTreeNodeWithTimeStamp> &&left,
                              ExclusiveGuard<BTreeNodeWithTimeStamp> &&right, leng_t left_pos) {
   if (left->MergeNodes(left_pos, parent.Ptr(), right.Ptr(), cmp_lambda_)) {
     // TODO(XXX): Free page left.PageID()
     if (FLAGS_wal_enable) {
-      // WAL merge left into right
-      auto &entry = left.PrepareWalEntry<WALMergeNodes>(0);
-      std::tie(entry.parent_pid, entry.left_pid, entry.right_pid, entry.left_pos) =
-        std::make_tuple(parent.PageID(), left.PageID(), right.PageID(), left_pos);
-      left.SubmitActiveWalEntry();
+      // WAL parent remove slot
+      {
+        auto &entry   = parent.PrepareWalEntry<WALRemove>(0);
+        entry.slot_id = left_pos;
+        parent.SubmitActiveWalEntry();
+      }
+      // WAL new page -- it is simpler to implement, but probably slightly inefficient
+      GenerateWALNewPage(right);
     }
-    if (parent->FreeSpaceAfterCompaction() >= BTreeNodeHeader::SIZE_UNDER_FULL) {
+    if (parent->FreeSpaceAfterCompaction() >= BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL) {
       left.Unlock();
       right.Unlock();
       // Parent node is underfull, try merge this inner node
@@ -219,8 +236,7 @@ void ExtendedBTree::EnsureUnderfullInnersForMerge(BTreeNodeWithTimeStamp *to_mer
   while (true) {
     try {
       // TODO(XXX): Implement tree-level compression
-      //  i.e. parent of parent is page 0 (i.e. metadata page)
-      //  and we can compress the inner nodes
+      //  i.e. parent of parent is page 0 (i.e. metadata page) and we can compress the inner nodes
       OptimisticGuard<BTreeNodeWithTimeStamp> parent(buffer_, METADATA_PAGE_ID);
       OptimisticGuard<BTreeNodeWithTimeStamp> node(
         buffer_, reinterpret_cast<MetadataPage *>(parent.Ptr())->GetRoot(metadata_slotid_), parent);
@@ -236,13 +252,14 @@ void ExtendedBTree::EnsureUnderfullInnersForMerge(BTreeNodeWithTimeStamp *to_mer
           node.Ptr() == to_merge &&               // Found the correct node to be merged
           node_pos < parent->header.count &&      // Current node is not the right most child
           parent->header.count >= 1 &&            // Parent has more than one children
-          (node->FreeSpaceAfterCompaction() >= BTreeNodeHeader::SIZE_UNDER_FULL)  // Current node is underfull
+          (node->FreeSpaceAfterCompaction() >=
+           BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL)  // Current node is underfull
       ) {
         // underfull
         auto right_pid =
           (node_pos < parent->header.count - 1) ? parent->GetChild(node_pos + 1) : parent->header.right_most_child;
         OptimisticGuard<BTreeNodeWithTimeStamp> right(buffer_, right_pid, parent);
-        if (right->FreeSpaceAfterCompaction() >= (PAGE_SIZE - BTreeNodeHeader::SIZE_UNDER_FULL)) {
+        if (right->FreeSpaceAfterCompaction() >= (PAGE_SIZE - BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL)) {
           ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
           ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
           ExclusiveGuard<BTreeNodeWithTimeStamp> right_locked(std::move(right));
@@ -334,10 +351,10 @@ auto ExtendedBTree::Remove(std::span<u8> key) -> bool {
       auto payload      = node->GetPayload(slot_id);
       leng_t entry_size = node->slots[slot_id].key_length + payload.size();
       if ((node->FreeSpaceAfterCompaction() + entry_size >=
-           BTreeNodeHeader::SIZE_UNDER_FULL) &&     // new node is under full
-          (parent.PageID() != METADATA_PAGE_ID) &&  // current node is not the root node
-          (parent->header.count >= 2) &&            // parent has more than one children
-          ((node_pos + 1) < parent->header.count)   // current node has a right sibling
+           BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL) &&  // new node is under full
+          (parent.PageID() != METADATA_PAGE_ID) &&            // current node is not the root node
+          (parent->header.count >= 2) &&                      // parent has more than one children
+          ((node_pos + 1) < parent->header.count)             // current node has a right sibling
       ) {
         // underfull
         ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
@@ -346,10 +363,14 @@ auto ExtendedBTree::Remove(std::span<u8> key) -> bool {
         node_locked->RemoveSlot(slot_id);
         // --------------------------------------------------------------------------
         // WAL Remove
-        if (FLAGS_wal_enable) { WAL_RECORD(node_locked, WALRemove, key, payload); }
+        if (FLAGS_wal_enable) {
+          auto &entry   = node_locked.PrepareWalEntry<WALRemove>(0);
+          entry.slot_id = slot_id;
+          node_locked.SubmitActiveWalEntry();
+        }
         // --------------------------------------------------------------------------
         // right child is also under full
-        if (right_locked->FreeSpaceAfterCompaction() >= (PAGE_SIZE - BTreeNodeHeader::SIZE_UNDER_FULL)) {
+        if (right_locked->FreeSpaceAfterCompaction() >= (PAGE_SIZE - BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL)) {
           TryMerge(std::move(parent_locked), std::move(node_locked), std::move(right_locked), node_pos);
         }
       } else {
@@ -358,7 +379,11 @@ auto ExtendedBTree::Remove(std::span<u8> key) -> bool {
         node_locked->RemoveSlot(slot_id);
         // --------------------------------------------------------------------------
         // WAL Remove
-        if (FLAGS_wal_enable) { WAL_RECORD(node_locked, WALRemove, key, payload); }
+        if (FLAGS_wal_enable) {
+          auto &entry   = node_locked.PrepareWalEntry<WALRemove>(0);
+          entry.slot_id = slot_id;
+          node_locked.SubmitActiveWalEntry();
+        }
         // --------------------------------------------------------------------------
       }
       return true;
@@ -398,17 +423,20 @@ auto ExtendedBTree::Update(std::span<u8> key, std::span<const u8> payload, const
         ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
         parent.ValidateOrRestart();
 
-        // Log previos payload, trigger func utility if provided, and remove the entry
-        if (FLAGS_wal_enable) { WAL_RECORD(node_locked, WALRemove, key, curr_payload); }
+        // Log previous payload, trigger func utility if provided, and remove the entry
+        if (FLAGS_wal_enable) {
+          auto &entry   = node_locked.PrepareWalEntry<WALRemove>(0);
+          entry.slot_id = slot_id;
+          node_locked.SubmitActiveWalEntry();
+        }
         if (func) { func(curr_payload); }
         node_locked->RemoveSlot(slot_id);
 
         // Insert new payload and add log entry
         node_locked->InsertKeyValue(key, payload, cmp_lambda_);
-        // would require time update, but the update method should not be used in the hot data to improve time ordered
-        // location
-
-        if (FLAGS_wal_enable) { WAL_RECORD(node_locked, WALInsert, key, payload); }
+        if (FLAGS_wal_enable) {
+          GenerateWAL<ExclusiveGuard<BTreeNodeWithTimeStamp>, WALInsert>(node_locked, key, payload);
+        }
         // --------------------------------------------------------------------------
         return true;  // success
       }
@@ -437,14 +465,10 @@ auto ExtendedBTree::UpdateInPlace(std::span<u8> key, const ModifyPayloadFunc &fu
       {
         ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
 
-        /* Retrieve previous payload for delta record */
+        /* Modify the record, and store the after-value */
         auto record = node_locked->GetPayload(pos);
-        if (FLAGS_wal_enable && delta != nullptr) { delta->UpdateDeltaPayload(record); }
-
-        /* Modify the record */
         func(record);
-        // would require time update, but the update method should not be used in the hot data to improve time ordered
-        // location
+        if (FLAGS_wal_enable && delta != nullptr) { delta->UpdateDeltaPayload(record); }
 
         /* Generate the delta record */
         if (FLAGS_wal_enable) {
@@ -468,7 +492,7 @@ void ExtendedBTree::ScanAscending(std::span<u8> key, const AccessRecordFunc &fn)
   auto pos = node->LowerBound(key, unused, cmp_lambda_);
   while (true) {
     if (pos < node->header.count) {
-      if (!ACCESS_RECORD_MACRO(node, pos, fn)) { return; }
+      if (!AccessRecord(node, pos, fn)) { return; }
       pos++;
     } else {
       if (!node->header.HasRightNeighbor()) { return; }
@@ -483,14 +507,13 @@ void ExtendedBTree::ScanDescending(std::span<u8> key, const AccessRecordFunc &fn
   bool found;
   int pos = static_cast<int>(node->LowerBound(key, found, cmp_lambda_));
   // LowerBound search always return the first position whose key >= the search key
-  // hence, if LowerBound doesn't give an exact match,
-  //    then the found key will > search key as we scan desc,
+  // hence, if LowerBound doesn't give an exact match, the found key will > search key as we scan desc,
   // any key > search key should be overlooked, i.e. start from pos - 1
   if (!found) { pos--; }
   while (true) {
     while (pos >= 0) {
       if (pos < node->header.count) {
-        if (!ACCESS_RECORD_MACRO(node, pos, fn)) { return; }
+        if (!AccessRecord(node, pos, fn)) { return; }
       }
       pos--;
     }
@@ -502,7 +525,9 @@ void ExtendedBTree::ScanDescending(std::span<u8> key, const AccessRecordFunc &fn
 
 auto ExtendedBTree::CountEntries() -> u64 {
   OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  auto root_pid = meta->GetRoot(metadata_slotid_);
+  InstantRecovery(root_pid);
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, root_pid, meta);
 
   return IterateAllNodes(
     node, [](BTreeNodeWithTimeStamp &) { return 0; }, [](BTreeNodeWithTimeStamp &node) { return node.header.count; });
@@ -532,8 +557,8 @@ auto ExtendedBTree::SizeInMB() -> float { return CountPages() * static_cast<floa
  * @brief Only used for Blob Handler indexes.
  * Similar to LookUp operator, but for Byte String as key
  */
-auto ExtendedBTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
-  -> bool {
+auto ExtendedBTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp,
+                               const AccessPayloadFunc &read_cb) -> bool {
   Ensure(cmp_lambda_.op == ComparisonOperator::BLOB_HANDLER);
   Ensure(cmp.op == ComparisonOperator::BLOB_LOOKUP);
   leng_t unused;

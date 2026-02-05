@@ -8,7 +8,6 @@
 #include "leanstore/leanstore.h"
 
 #include "share_headers/db_types.h"
-#include "share_headers/logger.h"
 
 #include <algorithm>
 #include <array>

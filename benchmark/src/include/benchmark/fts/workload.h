@@ -6,7 +6,6 @@
 #include "leanstore/leanstore.h"
 
 #include "share_headers/db_types.h"
-#include "share_headers/logger.h"
 
 #include <algorithm>
 #include <array>
@@ -96,7 +95,8 @@ struct FTSWorkload {
   // Constructor
   template <typename... Params>
   FTSWorkload(double txn_rate_per_worker, Params &&...params)
-      : orderline(AdapterType<OrderLineType>(std::forward<Params>(params)..., OrderLineType::ColumnSizes())), scheduler(txn_rate_per_worker) {}
+      : orderline(AdapterType<OrderLineType>(std::forward<Params>(params)..., OrderLineType::ColumnSizes())),
+        scheduler(txn_rate_per_worker) {}
 
   // -------------------------------------------------------------------------------------
   // Initial data loader

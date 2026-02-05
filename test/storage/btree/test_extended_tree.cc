@@ -31,7 +31,7 @@ class TestExtendedBTree : public BaseTest {
   template <typename value_t>
   void PrepareData(std::vector<std::pair<int, value_t>> &data, bool get_permutation = false, bool prefill_tree = true) {
     std::vector<uint32_t> columnSizes{sizeof(value_t)};
-    tree_ = std::make_unique<ExtendedBTree>(buffer_.get(), nullptr, columnSizes);
+    tree_ = std::make_unique<ExtendedBTree>(buffer_.get(), recovery_.get(), nullptr, columnSizes, 0);
     for (size_t idx = 0; idx < NO_RECORDS; idx++) {
       data.emplace_back(static_cast<int>(__builtin_bswap32(idx + 1)), static_cast<value_t>(idx * 100));
     }
@@ -90,7 +90,7 @@ TEST_F(TestExtendedBTree, RemoveAndQuery) {
       ASSERT_FALSE(success);
     }
 
-    auto found = tree_->LookUp(key, PayloadFunc());
+    auto found = tree_->LookUp(key, AccessPayloadFunc());
     ASSERT_FALSE(found);
   }
 
@@ -101,7 +101,7 @@ TEST_F(TestExtendedBTree, RemoveAndQuery) {
       std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};
       auto success = tree_->Remove(key);
       ASSERT_TRUE(success);
-      auto found = tree_->LookUp(key, PayloadFunc());
+      auto found = tree_->LookUp(key, AccessPayloadFunc());
       ASSERT_FALSE(found);
     }
   }
@@ -221,7 +221,7 @@ TEST_F(TestExtendedBTree, InsertAndCheckOrder) {
   // fill tree
   std::vector<std::pair<int, u64>> data;
   std::vector<uint32_t> columnSizes{sizeof(u64)};
-  tree_ = std::make_unique<ExtendedBTree>(buffer_.get(), nullptr, columnSizes);
+  tree_ = std::make_unique<ExtendedBTree>(buffer_.get(), recovery_.get(), nullptr, columnSizes, 0);
   for (size_t idx = 0; idx < NO_RECORDS; idx++) {
     data.emplace_back(static_cast<int>(__builtin_bswap32(idx)), static_cast<u64>(idx));
   }
@@ -239,7 +239,7 @@ TEST_F(TestExtendedBTree, InsertAndCheckOrder) {
     std::memcpy(&current, payload.data(), sizeof(u64));
     // int cur_key;
     // std::memcpy(&cur_key, key.data(), sizeof(int));
-    // LOG_INFO("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
+    // spdlog::info("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
     EXPECT_GE(current, last);
     last = current;
     return true;
@@ -254,7 +254,6 @@ TEST_F(TestExtendedBTree, InsertAndCheckOrder) {
 
 auto main(int argc, char **argv) -> int {
   ::testing::InitGoogleTest(&argc, argv);
-  FLAGS_bm_aio_qd    = 8;
   FLAGS_worker_count = 12;
 
   google::ParseCommandLineFlags(&argc, &argv, true);

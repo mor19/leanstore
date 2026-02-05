@@ -9,7 +9,7 @@
 namespace leanstore {
 
 // All functions should be idempotent + have no side-effect
-using AccessPayloadFunc = std::function<void(std::span<const u8>)>;
+using AccessPayloadFunc = std::function<void(std::span<u8>)>;
 using ModifyPayloadFunc = std::function<void(std::span<u8>)>;
 using AccessRecordFunc  = std::function<bool(std::span<u8>, std::span<u8>)>;
 

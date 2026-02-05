@@ -55,7 +55,7 @@ struct LeanStoreAdapter : Adapter<RecordBase> {
     -> std::span<const u8> override;
   void LoadBlob(u8 *blob_handler, const std::function<void(std::span<const u8>)> &read_cb, bool partial_load) override;
   void RemoveBlob(u8 *blob_handler) override;
-  auto LookUpBlob(std::span<uint8_t> blob_payload, const typename Adapter<RecordBase>::AccessPayloadFunc &fn)
+  auto LookUpBlob(std::span<uint8_t> blob_payload, const typename Adapter<RecordBase>::AccessRecordFunc &fn)
     -> bool override;
 };
 

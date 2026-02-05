@@ -35,8 +35,8 @@ class TestColumnRowStore : public BaseTest {
   template <typename value_t>
   void Prepare(std::vector<std::pair<int, value_t>> &data, bool get_permutation = false, bool prefill_tree = true,
                u32 recordsNO = NO_RECORDS) {
-    columnrowstore_ =
-      std::make_unique<ColumnRowStore>(buffer_.get(), blob_.get(), std::vector<uint32_t>{sizeof(value_t)});
+    columnrowstore_ = std::make_unique<ColumnRowStore>(buffer_.get(), blob_.get(), recovery_.get(),
+                                                       std::vector<uint32_t>{sizeof(value_t)}, 0, 1);
     for (size_t idx = 0; idx < recordsNO; idx++) {
       data.emplace_back(static_cast<int>(__builtin_bswap32(idx + 1)), static_cast<value_t>(idx * 100));
     }
@@ -96,7 +96,7 @@ TEST_F(TestColumnRowStore, RemoveAndQuery) {
       ASSERT_FALSE(success);
     }
 
-    auto found = columnrowstore_->LookUp(key, PayloadFunc());
+    auto found = columnrowstore_->LookUp(key, AccessPayloadFunc());
     ASSERT_FALSE(found);
   }
 
@@ -107,7 +107,7 @@ TEST_F(TestColumnRowStore, RemoveAndQuery) {
       std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};
       auto success = columnrowstore_->Remove(key);
       ASSERT_TRUE(success);
-      auto found = columnrowstore_->LookUp(key, PayloadFunc());
+      auto found = columnrowstore_->LookUp(key, AccessPayloadFunc());
       ASSERT_FALSE(found);
     }
   }
@@ -192,7 +192,8 @@ TEST_F(TestColumnRowStore, TreeScan) {
 TEST_F(TestColumnRowStore, InsertAndCheckOrder) {
   // fill tree
   std::vector<std::pair<int, u64>> data;
-  columnrowstore_ = std::make_unique<ColumnRowStore>(buffer_.get(), blob_.get(), std::vector<uint32_t>{sizeof(u64)});
+  columnrowstore_ = std::make_unique<ColumnRowStore>(buffer_.get(), blob_.get(), recovery_.get(),
+                                                     std::vector<uint32_t>{sizeof(u64)}, 0, 1);
   for (size_t idx = 0; idx < NO_RECORDS; idx++) {
     data.emplace_back(static_cast<int>(__builtin_bswap32(idx)), static_cast<u64>(idx));
   }
@@ -210,7 +211,7 @@ TEST_F(TestColumnRowStore, InsertAndCheckOrder) {
     std::memcpy(&current, payload.data(), sizeof(u64));
     // int cur_key;
     // std::memcpy(&cur_key, key.data(), sizeof(int));
-    // LOG_INFO("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
+    // spdlog::info("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
     EXPECT_GE(current, last);
     last = current;
     return true;
@@ -234,8 +235,8 @@ TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
-  LOG_INFO("cold tuples: %ld", columnrowstore_->CountColdEntries());
-  LOG_INFO("total tuples: %ld", columnrowstore_->CountEntries());
+  spdlog::info("cold tuples: %ld", columnrowstore_->CountColdEntries());
+  spdlog::info("total tuples: %ld", columnrowstore_->CountEntries());
 
   for (auto &pair : data) {
     std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
@@ -260,8 +261,8 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
-  LOG_INFO("cold tuples: %ld", columnrowstore_->CountColdEntries());
-  LOG_INFO("total tuples: %ld", columnrowstore_->CountEntries());
+  spdlog::info("cold tuples: %ld", columnrowstore_->CountColdEntries());
+  spdlog::info("total tuples: %ld", columnrowstore_->CountEntries());
 
   std::unordered_map<int, int> scan_result;
 
@@ -331,7 +332,7 @@ TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
       ASSERT_FALSE(success);
     }
 
-    auto found = columnrowstore_->LookUp(key, PayloadFunc());
+    auto found = columnrowstore_->LookUp(key, AccessPayloadFunc());
     ASSERT_FALSE(found);
   }
 
@@ -342,7 +343,7 @@ TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
       std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};
       auto success = columnrowstore_->Remove(key);
       ASSERT_TRUE(success);
-      auto found = columnrowstore_->LookUp(key, PayloadFunc());
+      auto found = columnrowstore_->LookUp(key, AccessPayloadFunc());
       ASSERT_FALSE(found);
     }
   }
@@ -394,7 +395,6 @@ TEST_F(TestColumnRowStore, ColdUpdateAndQuery) {
 
 auto main(int argc, char **argv) -> int {
   ::testing::InitGoogleTest(&argc, argv);
-  FLAGS_bm_aio_qd    = 8;
   FLAGS_worker_count = 1;
 
   google::ParseCommandLineFlags(&argc, &argv, true);

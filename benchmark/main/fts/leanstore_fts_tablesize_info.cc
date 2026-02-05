@@ -33,17 +33,17 @@ auto main(int argc, char **argv) -> int {
 
   // TPC-C loader
   for (Integer w_id = 1; w_id <= static_cast<Integer>(FLAGS_fts_warehouse_count); w_id++) {
-    spdlog::debug("Prepare for warehouse %d", w_id);
+    spdlog::debug("Prepare for warehouse {}", w_id);
     db->worker_pool.ScheduleAsyncJob(w_id % FLAGS_worker_count, [&, w_id]() {
       fts->InitializeThread();
       db->StartTransaction();
       fts->LoadOrderLineForWarehouse(w_id);
       db->CommitTransaction();
     });
-    spdlog::debug("Prepare warehouse %d successfully", w_id);
+    spdlog::debug("Prepare warehouse {} successfully", w_id);
   }
   db->worker_pool.JoinAll();
-  spdlog::info("Space used: %.4f GB", db->AllocatedSize());
+  spdlog::info("Space used: {:.4f} GB", db->AllocatedSize());
 
   // get table sizes
   db->worker_pool.ScheduleSyncJob(0, [&]() {

@@ -231,7 +231,6 @@ TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
 
   columnrowstore_->ConvertHotDataToColdData();
   txn_man_->CommitTransaction();
-  txn_man_->AddBarrierTransaction();
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
@@ -257,7 +256,6 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
 
   columnrowstore_->ConvertHotDataToColdData();
   txn_man_->CommitTransaction();
-  txn_man_->AddBarrierTransaction();
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
@@ -310,7 +308,6 @@ TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
 
   columnrowstore_->ConvertHotDataToColdData();
   txn_man_->CommitTransaction();
-  txn_man_->AddBarrierTransaction();
   InitRandTransaction();
 
   std::array<bool, TWO_NO_RECORDS + 1> removed_f = {false};
@@ -359,7 +356,6 @@ TEST_F(TestColumnRowStore, ColdUpdateAndQuery) {
 
   columnrowstore_->ConvertHotDataToColdData();
   txn_man_->CommitTransaction();
-  txn_man_->AddBarrierTransaction();
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->IsNotEmpty());

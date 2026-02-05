@@ -45,17 +45,17 @@ auto main(int argc, char **argv) -> int {
 
   // TPC-C loader
   for (Integer w_id = 1; w_id <= static_cast<Integer>(FLAGS_fts_warehouse_count); w_id++) {
-    spdlog::debug("Prepare for warehouse %d", w_id);
+    spdlog::debug("Prepare for warehouse {}", w_id);
     db->worker_pool.ScheduleAsyncJob(w_id % FLAGS_worker_count, [&, w_id]() {
       fts->InitializeThread();
       db->StartTransaction();
       fts->LoadOrderLineForWarehouse(w_id);
       db->CommitTransaction();
     });
-    spdlog::debug("Prepare warehouse %d successfully", w_id);
+    spdlog::debug("Prepare warehouse {} successfully", w_id);
   }
   db->worker_pool.JoinAll();
-  spdlog::info("Space used: %.4f GB", db->AllocatedSize());
+  spdlog::info("Space used: {:.4f} GB", db->AllocatedSize());
 
   // move hot to cold data
   // TODO(moritz)
@@ -83,8 +83,8 @@ auto main(int argc, char **argv) -> int {
   db->worker_pool.JoinAll();
   ctrl.StopPerfRuntime();
   db->Shutdown();
-  spdlog::info("executed medium query %d times on %d worker threads", FLAGS_fts_run_queries_count, FLAGS_worker_count);
+  spdlog::info("executed medium query {} times on {} worker threads", FLAGS_fts_run_queries_count, FLAGS_worker_count);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
-  spdlog::info("scan: %.4f tuples/s", leanstore::statistics::total_scanned_tuples.load() / e.getDuration());
+  spdlog::info("scan: {:.4f} tuples/s", leanstore::statistics::total_scanned_tuples.load() / e.getDuration());
 }

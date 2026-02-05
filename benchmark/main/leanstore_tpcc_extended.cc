@@ -40,7 +40,7 @@ auto main(int argc, char **argv) -> int {
     db->CommitTransaction();
   });
   for (Integer w_id = 1; w_id <= static_cast<Integer>(FLAGS_tpcc_warehouse_count); w_id++) {
-    spdlog::debug("Prepare for warehouse %d", w_id);
+    spdlog::debug("Prepare for warehouse {}", w_id);
     db->worker_pool.ScheduleAsyncJob(w_id % FLAGS_worker_count, [&, w_id]() {
       tpcc->InitializeThread();
       db->StartTransaction();
@@ -52,10 +52,10 @@ auto main(int argc, char **argv) -> int {
       }
       db->CommitTransaction();
     });
-    spdlog::debug("Prepare warehouse %d successfully", w_id);
+    spdlog::debug("Prepare warehouse {} successfully", w_id);
   }
   db->worker_pool.JoinAll();
-  spdlog::info("Space used: %.4f GB", db->AllocatedSize());
+  spdlog::info("Space used: {:.4f} GB", db->AllocatedSize());
   auto initial_wal_size = db->WALSize();
 
 #ifdef DEBUG
@@ -63,18 +63,18 @@ auto main(int argc, char **argv) -> int {
     db->StartTransaction();
     auto w_cnt = tpcc->warehouse.Count();
     auto d_cnt = tpcc->district.Count();
-    spdlog::debug("Warehouse count: %lu - District count: %lu", w_cnt, d_cnt);
+    spdlog::debug("Warehouse count: {} - District count: {}", w_cnt, d_cnt);
     assert(w_cnt == FLAGS_tpcc_warehouse_count);
     assert(d_cnt == FLAGS_tpcc_warehouse_count * tpcc->D_PER_WH);
 
     auto c_cnt       = tpcc->customer.Count();
     auto c_index_cnt = tpcc->customer_wdc.Count();
-    spdlog::debug("Customer count: %lu - Customer's index count: %lu", c_cnt, c_index_cnt);
+    spdlog::debug("Customer count: {} - Customer's index count: {}", c_cnt, c_index_cnt);
     assert(c_cnt == c_index_cnt);
 
     auto o_cnt       = tpcc->order.Count();
     auto o_index_cnt = tpcc->order_wdc.Count();
-    spdlog::debug("Order count: %lu - Order's index count: %lu", o_cnt, o_index_cnt);
+    spdlog::debug("Order count: {} - Order's index count: {}", o_cnt, o_index_cnt);
     assert(o_cnt == o_index_cnt);
     db->CommitTransaction();
   });
@@ -107,9 +107,9 @@ auto main(int argc, char **argv) -> int {
   keep_running = false;
   ctrl.StopPerfRuntime();
   db->Shutdown();
-  spdlog::info("Space used: %.4f GB - WAL size: %.4f GB", db->AllocatedSize(), db->WALSize() - initial_wal_size);
+  spdlog::info("Space used: {:.4f} GB - WAL size: {:.4f} GB", db->AllocatedSize(), db->WALSize() - initial_wal_size);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
-  spdlog::info("scan: %.4f tuples/s",
+  spdlog::info("scan: {:.4f} tuples/s",
                leanstore::statistics::total_scanned_tuples.load() / static_cast<double>(FLAGS_tpcc_exec_seconds));
 }

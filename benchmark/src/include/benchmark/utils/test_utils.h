@@ -4,6 +4,7 @@
 #include "typefold/typefold.h"
 
 #include <string>
+#include <vector>
 
 namespace benchmark {
 
@@ -33,6 +34,8 @@ struct RelationTest {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::primary_id); }
+
+  static std::vector<uint32_t> ColumnSizes() { return {sizeof(Integer)}; }
 };
 
 /**
@@ -74,6 +77,8 @@ struct VariableSizeRelation {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::primary_id); }
+
+  static std::vector<uint32_t> ColumnSizes() { return {sizeof(Integer), 0}; }
 };
 
 }  // namespace benchmark

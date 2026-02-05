@@ -8,6 +8,8 @@
 #include <cstring>
 #include <memory>
 #include <tuple>
+#include <vector>
+
 
 using leanstore::sync::DeferLog;
 using leanstore::sync::ExclusiveGuard;
@@ -160,6 +162,7 @@ void BTree::TrySplit(ExclusiveGuard<BTreeNode> &&parent, ExclusiveGuard<BTreeNod
 
   // must split parent to make space for separator, restart from root to do this
   node.Unlock();
+
   EnsureSpaceForSplit(parent.UnlockAndGetPtr(), {sep_key, sep_info.len});
 }
 

@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <random>
+#include <unordered_set>
 
 namespace tpcc {
 

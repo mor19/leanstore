@@ -7,6 +7,7 @@
 #include "storage/page.h"
 #include "sync/hybrid_latch.h"
 
+#include <ctime>
 #include <span>
 #include <string>
 
@@ -111,12 +112,25 @@ struct BTreeNodeHeaderWithLatch : BTreeNodeHeader {
   explicit BTreeNodeHeaderWithLatch(bool is_leaf) : BTreeNodeHeader(is_leaf) {}
 };
 
+/**
+ * Similar to BTreeNodeHeader, but has a timestamp to track last access for hot/cold separation
+ */
+struct BTreeNodeHeaderWithTimestamp : BTreeNodeHeader {
+ public:
+  std::time_t timestamp;
+
+  explicit BTreeNodeHeaderWithTimestamp(bool is_leaf) : BTreeNodeHeader(is_leaf) {
+    if (is_leaf) { std::time(&timestamp); }
+  }
+};
+
 // -------------------------------------------------------------------------------------
 template <class NodeHeader>
 class alignas(PAGE_SIZE) BTreeNodeImpl : public PageHeader {
  public:
   static constexpr u32 MAX_RECORD_SIZE =
-    ((PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader) - (3 * sizeof(PageSlot)))) / 3;
+    ((PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader) - (3 * sizeof(PageSlot)))) /
+    3;  // minium of 3 key+value pairs per node
 
   NodeHeader header;
   PageSlot slots[(PAGE_SIZE - sizeof(NodeHeader) - sizeof(PageHeader)) / sizeof(PageSlot)];
@@ -194,9 +208,12 @@ class alignas(PAGE_SIZE) BTreeNodeImpl : public PageHeader {
 };
 
 using BTreeNode = BTreeNodeImpl<BTreeNodeHeader>;
+using BTreeNodeWithTimeStamp = BTreeNodeImpl<BTreeNodeHeaderWithTimestamp>;
 
 static_assert(sizeof(BTreeNode) == PAGE_SIZE);
 static_assert(BTreeNode::MAX_RECORD_SIZE > 1.2 * KB);
 static_assert(blob::BlobState::MAX_MALLOC_SIZE <= BTreeNode::MAX_RECORD_SIZE);
+static_assert(sizeof(BTreeNodeWithTimeStamp) == PAGE_SIZE);
+static_assert(sizeof(InMemoryBTreeNode) == PAGE_SIZE);
 
 }  // namespace leanstore::storage

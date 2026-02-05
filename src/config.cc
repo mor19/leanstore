@@ -8,17 +8,17 @@
 DEFINE_bool(uring_iopool, false,
             "Whether to enable IORING_SETUP_IOPOLL for all uring instances or not"
             "Require the block device (SSD) to support IOPOLL");
-DEFINE_string(db_path, "/dev/s0", "Default block device");
-DEFINE_uint32(worker_count, 16, "The number of workers");
+DEFINE_string(db_path, "/dev/nvme0n1p3", "Default block device");
+DEFINE_uint32(worker_count, 1, "The number of workers");
 DEFINE_uint32(page_provider_thread, 0, "Number of page provider threads");
 DEFINE_bool(worker_pin_thread, false, "Pin worker to a specific thread");
 DEFINE_uint32(txn_rate, 0, "Limit transaction rate in second for latency checking -- Disabled by default");
 // -----------------------------------------------------------------------------------
 /* Buffer manager */
-DEFINE_uint64(bm_virtual_gb, 4, "Size of virtual memory in GB");
-DEFINE_uint64(bm_physical_gb, 1, "Size of physical memory in GB");
-DEFINE_uint64(bm_alias_block_mb, 1024, "Size of worker-local aliasing area in MB");
-DEFINE_uint64(bm_evict_batch_size, 64, "Expected number of pages to be evicted during each eviction");
+DEFINE_uint64(bm_virtual_gb, 8, "Size of virtual memory in GB");                                         // default 4
+DEFINE_uint64(bm_physical_gb, 2, "Size of physical memory in GB");                                       // default 1
+DEFINE_uint64(bm_alias_block_mb, 2048, "Size of worker-local aliasing area in MB");                      // default 1024
+DEFINE_uint64(bm_evict_batch_size, 128, "Expected number of pages to be evicted during each eviction");  // default 64
 DEFINE_bool(bm_enable_fair_eviction, true,
             "Whether to use fair extent eviction policy or not"
             "Fair eviction policy: Large extents are more likely to be evicted than small extents/pages");
@@ -31,7 +31,7 @@ DEFINE_uint32(wal_variant, 2,
               "1. The Remote-Flush-Avoidance variant by Michael Haubenschild"
               "2. The GSN-vector proposal");
 DEFINE_bool(wal_debug, false, "Enable debugging for WAL ops");
-DEFINE_bool(wal_fsync, true, "Force FSync for WAL");
+DEFINE_bool(wal_fsync, false, "Force FSync for WAL");
 DEFINE_uint64(wal_buffer_size_mb, 10, "Size of WAL log buffer in MB");
 
 /* Configuration for commit protocols */
@@ -59,7 +59,7 @@ DEFINE_string(txn_default_isolation_level, "ru",
 DEFINE_int32(txn_commit_variant, static_cast<int>(leanstore::transaction::CommitProtocol::AUTONOMOUS_COMMIT),
              "Which commit strategy to be used, see transaction::CommitProtocol"
              "See class leanstore::transaction::CommitProtocol for your information");
-DEFINE_uint32(txn_commit_group_size, 2,
+DEFINE_uint32(txn_commit_group_size, 1,
               "The size (number of workers) of the commit group, in which workers of the same group can:"
               "- Workers in the same group trigger commit for the whole group directly");
 DEFINE_uint32(txn_queue_size_mb, 10, "The transaction queue size in MB");
@@ -77,3 +77,7 @@ DEFINE_uint64(blob_buffer_pool_gb, 1,
               "Fixed size of the virtual memory range of BLOB in GBs"
               "0. Same value with FLAGS_bm_virtual_gb"
               "> 0. Fixed value");
+// -----------------------------------------------------------------------------------
+/* Hot/Cold separation */
+DEFINE_uint32(htap_expire_seconds, 10,
+              "Seconds to wait before moving hot data into cold data (before hot data expires into cold data)");

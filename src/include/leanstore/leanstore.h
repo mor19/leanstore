@@ -14,6 +14,7 @@
 #include "recovery/log_manager.h"
 #include "storage/blob/blob_manager.h"
 #include "storage/btree/tree.h"
+#include "storage/hybrid/columnrowstore.h"
 #include "transaction/transaction_manager.h"
 
 #include <random>
@@ -51,7 +52,7 @@ class LeanStore {
 
   // Misc
   ZipfGenerator gen;
-  std::unordered_map<std::type_index, std::unique_ptr<KVInterface>> indexes;  // Stupid Catalog
+  std::unordered_map<std::type_index, std::unique_ptr<HKVInterface>> indexes;  // Stupid Catalog
 
   LeanStore();
   ~LeanStore();
@@ -59,8 +60,8 @@ class LeanStore {
   void CheckDuringIdle();
 
   // Catalog operations
-  void RegisterTable(const std::type_index &relation, u32 relation_idx);
-  auto RetrieveIndex(const std::type_index &relation) -> KVInterface *;
+  void RegisterTable(const std::type_index &relation, u32 relation_idx, std::vector<u32> columnSizes);
+  auto RetrieveIndex(const std::type_index &relation) -> HKVInterface *;
 
   // Convenient txn helpers
   void StartTransaction(timestamp_t txn_arrival_time = 0, Transaction::Mode tx_mode = Transaction::Mode::OLTP,

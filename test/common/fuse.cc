@@ -13,7 +13,9 @@ struct LeanStoreFUSE {
   std::unique_ptr<LeanStoreAdapter<leanstore::fuse::FileRelation>> adapter;
 
   explicit LeanStoreFUSE(leanstore::LeanStore *db)
-      : db(db), adapter(std::make_unique<LeanStoreAdapter<leanstore::fuse::FileRelation>>(*db)) {}
+      : db(db),
+        adapter(std::make_unique<LeanStoreAdapter<leanstore::fuse::FileRelation>>(
+          *db, leanstore::fuse::FileRelation::ColumnSizes())) {}
 
   ~LeanStoreFUSE() = default;
 

@@ -6,6 +6,7 @@
 #include "typefold/typefold.h"
 
 #include <cstring>
+#include <vector>
 
 using FilePath = Varchar<128>;
 
@@ -34,6 +35,8 @@ struct FileRelation {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::file_name); }
+
+   static std::vector<uint32_t> ColumnSizes() { return {sizeof(leanstore::BlobState)}; }
 };
 
 }  // namespace leanstore::fuse

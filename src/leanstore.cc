@@ -230,18 +230,18 @@ void LeanStore::CheckDuringIdle() {
 }
 
 // -------------------------------------------------------------------------------------
-void LeanStore::RegisterTable(const std::type_index &relation, uint32_t relation_idx) {
+void LeanStore::RegisterTable(const std::type_index &relation, uint32_t relation_idx, std::vector<u32> columnSizes) {
   assert(indexes.find(relation) == indexes.end());
   assert(FLAGS_worker_count > 0);
   if (FLAGS_wal_enable_recovery) { Ensure(recovery->HasRecovered(METADATA_PAGE_ID)); }
   worker_pool.ScheduleSyncJob(0, [&]() {
     transaction_manager->StartTransaction(leanstore::transaction::Transaction::Type::SYSTEM);
-    indexes.try_emplace(relation, std::make_unique<storage::BTree>(buffer_pool.get(), recovery.get(), relation_idx));
+    indexes.try_emplace(relation, std::make_unique<storage::ColumnRowStore>(buffer_pool.get(), blob_manager.get(), columnSizes, false));
     CommitTransaction();
   });
 }
 
-auto LeanStore::RetrieveIndex(const std::type_index &relation) -> KVInterface * {
+auto LeanStore::RetrieveIndex(const std::type_index &relation) -> HKVInterface * {
   assert(indexes.find(relation) != indexes.end());
   return indexes.at(relation).get();
 }

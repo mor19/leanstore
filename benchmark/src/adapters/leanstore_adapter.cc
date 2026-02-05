@@ -1,20 +1,24 @@
 #include "benchmark/adapters/leanstore_adapter.h"
 #include "benchmark/filebench/webserver/schema.h"
+#include "benchmark/fts/schema.h"
 #include "benchmark/fuse/schema.h"
 #include "benchmark/gitclone/schema.h"
 #include "benchmark/tatp/schema.h"
 #include "benchmark/tpcc/schema.h"
+#include "benchmark/tpcc_extended/schema_extended.h"
 #include "benchmark/utils/test_utils.h"
 #include "benchmark/wikipedia/schema.h"
 #include "benchmark/ycsb/schema.h"
 #include "leanstore/schema.h"
 
 #include <span>
+#include <unordered_set>
+#include <vector>
 
 template <class RecordBase>
-LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db)
+LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db, std::vector<u32> columnSizes)
     : relation_(static_cast<std::type_index>(typeid(RecordBase))), db_(&db) {
-  db_->RegisterTable(relation_, RecordBase::TYPE_ID);  // TYPE_ID is a part of the LeanStore stupid catalog
+  db_->RegisterTable(relation_, RecordBase::TYPE_ID, columnSizes);  // TYPE_ID is a part of the LeanStore stupid catalog
   tree_ = db_->RetrieveIndex(relation_);
 }
 
@@ -63,6 +67,23 @@ template <class RecordBase>
 void LeanStoreAdapter<RecordBase>::ScanDesc(const typename RecordBase::Key &key,
                                             const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb) {
   ScanImpl(key, found_record_cb, false);
+}
+
+template <class RecordBase>
+void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key &r_key,
+                                                 const std::unordered_set<uint32_t> &column_idxs,
+                                                 const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
+                                                 const bool ascending) {
+  u8 key[RecordBase::MaxFoldLength()];
+  auto len = RecordBase::FoldKey(key, r_key);
+
+  auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
+    typename RecordBase::Key typed_key;
+    RecordBase::UnfoldKey(key.data(), typed_key);
+    return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
+  };
+
+  tree_->ScanOptimized({key, len}, column_idxs, read_cb, ascending);
 }
 
 template <class RecordBase>
@@ -184,6 +205,14 @@ template struct LeanStoreAdapter<tpcc::OrderWDCType>;
 template struct LeanStoreAdapter<tpcc::OrderLineType>;
 template struct LeanStoreAdapter<tpcc::ItemType>;
 template struct LeanStoreAdapter<tpcc::StockType>;
+
+// For TPC-C Extended
+template struct LeanStoreAdapter<tpcc::NationType>;
+template struct LeanStoreAdapter<tpcc::RegionType>;
+template struct LeanStoreAdapter<tpcc::SupplierType>;
+
+// For FTS
+template struct LeanStoreAdapter<fts::OrderLineType>;
 
 // For TATP
 template struct LeanStoreAdapter<tatp::SubscriberType>;

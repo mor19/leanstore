@@ -63,5 +63,6 @@ void SharedGuard<PageClass>::Unlock() {
 template class SharedGuard<storage::Page>;
 template class SharedGuard<storage::MetadataPage>;
 template class SharedGuard<storage::BTreeNode>;
+template class SharedGuard<storage::BTreeNodeWithTimeStamp>;
 
 }  // namespace leanstore::sync

@@ -5,6 +5,7 @@
 #include "typefold/typefold.h"
 
 #include <stdexcept>
+#include <vector>
 
 namespace tpcc {
 
@@ -38,6 +39,11 @@ struct WarehouseType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::w_id); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Varchar<10>), sizeof(Varchar<20>), sizeof(Varchar<20>), sizeof(Varchar<20>),
+            sizeof(Varchar<2>),  sizeof(Varchar<9>),  sizeof(Numeric),     sizeof(Numeric)};
+  }
 };
 
 struct DistrictType {
@@ -74,6 +80,11 @@ struct DistrictType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::d_w_id) + sizeof(Key::d_id); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Varchar<10>), sizeof(Varchar<20>), sizeof(Varchar<20>), sizeof(Varchar<20>), sizeof(Varchar<2>),
+            sizeof(Varchar<9>),  sizeof(Numeric),     sizeof(Numeric),     sizeof(Integer)};
+  }
 };
 
 struct CustomerType {
@@ -122,6 +133,13 @@ struct CustomerType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::c_w_id) + sizeof(Key::c_d_id) + sizeof(Key::c_id); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Varchar<16>), sizeof(Varchar<2>), sizeof(Varchar<16>), sizeof(Varchar<20>), sizeof(Varchar<20>),
+            sizeof(Varchar<20>), sizeof(Varchar<2>), sizeof(Varchar<9>),  sizeof(Varchar<16>), sizeof(Timestamp),
+            sizeof(Varchar<2>),  sizeof(Numeric),    sizeof(Numeric),     sizeof(Numeric),     sizeof(Numeric),
+            sizeof(Numeric),     sizeof(Numeric),    sizeof(Varchar<500>)};
+  }
 };
 
 struct CustomerWDCType {
@@ -158,6 +176,8 @@ struct CustomerWDCType {
   static auto MaxFoldLength() -> uint32_t {
     return 0 + sizeof(Key::c_w_id) + sizeof(Key::c_d_id) + sizeof(Key::c_last) + sizeof(Key::c_first);
   }
+
+  static std::vector<uint32_t> ColumnSizes() { return {sizeof(Integer)}; }
 };
 
 struct HistoryType {
@@ -193,6 +213,11 @@ struct HistoryType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::h_t_id) + sizeof(Key::h_pk); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Integer), sizeof(Integer),   sizeof(Integer), sizeof(Integer),
+            sizeof(Integer), sizeof(Timestamp), sizeof(Numeric), sizeof(Varchar<24>)};
+  }
 };
 
 struct NewOrderType {
@@ -224,6 +249,8 @@ struct NewOrderType {
   static auto MaxFoldLength() -> uint32_t {
     return 0 + sizeof(Key::no_w_id) + sizeof(Key::no_d_id) + sizeof(Key::no_o_id);
   }
+
+  static std::vector<uint32_t> ColumnSizes() { return {}; }
 };
 
 struct OrderType {
@@ -259,6 +286,10 @@ struct OrderType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::o_w_id) + sizeof(Key::o_d_id) + sizeof(Key::o_id); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Integer), sizeof(Timestamp), sizeof(Integer), sizeof(Numeric), sizeof(Numeric)};
+  }
 };
 
 struct OrderWDCType {
@@ -293,6 +324,8 @@ struct OrderWDCType {
   static auto MaxFoldLength() -> uint32_t {
     return 0 + sizeof(Key::o_w_id) + sizeof(Key::o_d_id) + sizeof(Key::o_c_id) + sizeof(Key::o_id);
   }
+
+  static std::vector<uint32_t> ColumnSizes() { return {}; }
 };
 
 struct OrderLineType {
@@ -334,6 +367,10 @@ struct OrderLineType {
   static auto MaxFoldLength() -> uint32_t {
     return 0 + sizeof(Key::ol_w_id) + sizeof(Key::ol_d_id) + sizeof(Key::ol_o_id) + sizeof(Key::ol_number);
   }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Integer), sizeof(Integer), sizeof(Timestamp), sizeof(Numeric), sizeof(Numeric), sizeof(Varchar<24>)};
+  }
 };
 
 struct ItemType {
@@ -362,6 +399,10 @@ struct ItemType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::i_id); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Integer), sizeof(Varchar<24>), sizeof(Numeric), sizeof(Varchar<50>)};
+  }
 };
 
 struct StockType {
@@ -420,6 +461,12 @@ struct StockType {
   }
 
   static auto MaxFoldLength() -> uint32_t { return 0 + sizeof(Key::s_w_id) + sizeof(Key::s_i_id); }
+
+  static std::vector<uint32_t> ColumnSizes() {
+    return {sizeof(Numeric),     sizeof(Varchar<24>), sizeof(Varchar<24>), sizeof(Varchar<24>), sizeof(Varchar<24>),
+            sizeof(Varchar<24>), sizeof(Varchar<24>), sizeof(Varchar<24>), sizeof(Varchar<24>), sizeof(Varchar<24>),
+            sizeof(Varchar<24>), sizeof(Numeric),     sizeof(Numeric),     sizeof(Numeric),     sizeof(Varchar<50>)};
+  }
 };
 
 }  // namespace tpcc

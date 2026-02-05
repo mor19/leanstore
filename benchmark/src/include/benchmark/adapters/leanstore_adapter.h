@@ -1,25 +1,27 @@
 #pragma once
 
 #include "benchmark/adapters/adapter.h"
-#include "leanstore/kv_interface.h"
+#include "leanstore/hkv_interface.h"
 #include "leanstore/leanstore.h"
 
 #include <typeindex>
 #include <typeinfo>
+#include <unordered_set>
+#include <vector>
 
 template <class RecordBase>
 struct LeanStoreAdapter : Adapter<RecordBase> {
  private:
   std::type_index relation_;
   leanstore::LeanStore *db_;
-  leanstore::KVInterface *tree_;
+  leanstore::HKVInterface *tree_;
 
   // helper for Scan operators
   void ScanImpl(const typename RecordBase::Key &r_key,
                 const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb, bool scan_ascending);
 
  public:
-  explicit LeanStoreAdapter(leanstore::LeanStore &db);
+  explicit LeanStoreAdapter(leanstore::LeanStore &db, std::vector<u32> columnSizes);
   ~LeanStoreAdapter() override = default;
 
   // -------------------------------------------------------------------------------------
@@ -33,6 +35,9 @@ struct LeanStoreAdapter : Adapter<RecordBase> {
             const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb) override;
   void ScanDesc(const typename RecordBase::Key &key,
                 const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb) override;
+  void ScanOptimized(const typename RecordBase::Key &key, const std::unordered_set<uint32_t> &column_idxs,
+                     const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
+                     const bool ascending) override;
   void Insert(const typename RecordBase::Key &r_key, const RecordBase &record) override;
   void InsertRawPayload(const typename RecordBase::Key &r_key, std::span<const u8> record);
   void Update(const typename RecordBase::Key &r_key, const RecordBase &record) override;

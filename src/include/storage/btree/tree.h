@@ -6,6 +6,7 @@
 #include "storage/btree/node.h"
 #include "storage/btree/wal.h"
 #include "storage/page.h"
+#include "storage/blob/blob_manager.h"
 #include "sync/page_guard/exclusive_guard.h"
 #include "sync/page_guard/optimistic_guard.h"
 #include "sync/page_guard/shared_guard.h"
@@ -14,6 +15,9 @@
 #include <functional>
 #include <span>
 #include <utility>
+#include <tuple>
+#include <vector>
+
 
 namespace leanstore::storage {
 
@@ -89,6 +93,7 @@ class BTree : public KVInterface {
 
   /* Comparison properties */
   ComparisonLambda cmp_lambda_{ComparisonOperator::MEMCMP, std::memcmp};
+
 };
 
 }  // namespace leanstore::storage

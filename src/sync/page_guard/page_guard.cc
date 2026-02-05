@@ -103,5 +103,6 @@ void PageGuard<PageClass>::SubmitActiveWalEntry() {
 template class PageGuard<storage::Page>;
 template class PageGuard<storage::MetadataPage>;
 template class PageGuard<storage::BTreeNode>;
+template class PageGuard<storage::BTreeNodeWithTimeStamp>;
 
 }  // namespace leanstore::sync

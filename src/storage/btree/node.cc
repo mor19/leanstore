@@ -331,7 +331,7 @@ void BTreeNodeImpl<NodeHeader>::StoreRecordDataWithoutPrefix(leng_t slot_id, std
   header.space_used += required_space;
   // update slots info of this key
   slots[slot_id] = (PageSlot){header.data_offset, static_cast<leng_t>(key_no_prefix.size()),
-                              static_cast<leng_t>(payload.size()), BTreeNode::GetHead(key, key_no_prefix.size())};
+                              static_cast<leng_t>(payload.size()), BTreeNodeImpl::GetHead(key, key_no_prefix.size())};
   assert(GetKey(slot_id) >= reinterpret_cast<u8 *>(&slots[slot_id]));
   // copy record content into the page
   std::memcpy(GetKey(slot_id), key, key_no_prefix.size());
@@ -536,7 +536,7 @@ auto BTreeNodeImpl<NodeHeader>::MergeNodes(leng_t left_slot_id, BTreeNodeImpl<No
     assert((right->header.is_leaf) && (parent->IsInner()));
     // calculate the upper bound on space used of the new node
     auto space_upper_bound =
-      sizeof(BTreeNodeHeader) +                                     // size of BTreeNodeHeader (i.e. metadata)
+      sizeof(NodeHeader) +                                          // size of NodeHeader (i.e. metadata)
       header.space_used + right->header.space_used +                // size of all keys + their payload
       (header.prefix_len - tmp.header.prefix_len) * header.count +  //  grow from prefix compression for left node
       (right->header.prefix_len - tmp.header.prefix_len) * right->header.count +  // same as above for right node
@@ -552,7 +552,7 @@ auto BTreeNodeImpl<NodeHeader>::MergeNodes(leng_t left_slot_id, BTreeNodeImpl<No
     // calculate the upper bound on space used of the new node
     auto extra_key_len = parent->header.prefix_len + parent->slots[left_slot_id].key_length;
     auto space_upper_bound =
-      sizeof(BTreeNodeHeader) +                                     // size of BTreeNodeHeader (i.e. metadata)
+      sizeof(NodeHeader) +                                          // size of NodeHeader (i.e. metadata)
       header.space_used + right->header.space_used +                // size of all keys + their payload
       (header.prefix_len - tmp.header.prefix_len) * header.count +  //  grow from prefix compression for left node
       (right->header.prefix_len - tmp.header.prefix_len) * right->header.count +  // same as above for right node
@@ -639,6 +639,7 @@ auto BTreeNodeImpl<NodeHeader>::LowerBoundWithBlobKey(const blob::BlobLookupKey 
   return lower;
 }
 
+template class BTreeNodeImpl<BTreeNodeHeaderWithTimestamp>;
 template class BTreeNodeImpl<BTreeNodeHeader>;
 template class BTreeNodeImpl<BTreeNodeHeaderWithLatch>;
 

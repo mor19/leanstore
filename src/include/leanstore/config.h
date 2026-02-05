@@ -38,3 +38,5 @@ DECLARE_bool(blob_enable);
 DECLARE_bool(blob_tail_extent);
 DECLARE_bool(blob_normal_buffer_pool);
 DECLARE_uint64(blob_buffer_pool_gb);
+// -----------------------------------------------------------------------------------
+DECLARE_uint32(htap_expire_seconds);

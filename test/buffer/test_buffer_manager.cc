@@ -26,7 +26,8 @@ class TestBufferManager : public BaseTest {
 };
 
 TEST_F(TestBufferManager, BasicTest) {
-  size_t in_memory_cap = std::round(PHYSICAL_CAP * 0.9) - 1;
+  size_t in_memory_cap = std::round(PHYSICAL_CAP * 0.9);
+  // size_t in_memory_cap = std::round(PHYSICAL_CAP * 0.9) - 1 ; // only necessary for PHYSICAL_CAP = 1024 to prevent off by 1
 
   EXPECT_EQ(buffer_->physical_used_cnt_, 1);
   // Initially, all pages should be in UNLOCKED mode, i.e. not yet initialized

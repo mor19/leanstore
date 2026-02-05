@@ -37,10 +37,17 @@ namespace leanstore {
 
 class BaseTest : public ::testing::Test {
  public:
+<<<<<<< Updated upstream
   static constexpr u64 N_PAGES      = 2048;
   static constexpr u64 EXTRA_NO_PG  = 16;
   static constexpr u64 PHYSICAL_CAP = 1024;
   static constexpr u64 EVICT_SIZE   = 8;
+=======
+  static constexpr u64 N_PAGES      = 2048 * 4; // default 2048
+  static constexpr u64 EXTRA_NO_PG  = 16; // default 16
+  static constexpr u64 PHYSICAL_CAP = N_PAGES/2; // default 1024
+  static constexpr u64 EVICT_SIZE   = 8;  // should be <= FLAGS_bm_aio_qd defined in main.cc  // default 8
+>>>>>>> Stashed changes
 
  protected:
   // Env
@@ -49,6 +56,7 @@ class BaseTest : public ::testing::Test {
 
   // All components of LeanStore
   std::unique_ptr<buffer::BufferManager> buffer_;
+  std::unique_ptr<storage::blob::BlobManager> blob_;
   std::unique_ptr<recovery::LogManager> log_;
   std::unique_ptr<transaction::TransactionManager> txn_man_;
   std::unique_ptr<recovery::RecoveryManager> recovery_;
@@ -70,10 +78,18 @@ class BaseTest : public ::testing::Test {
 #ifdef ENABLE_TESTING
     transaction::TransactionManager::active_txn.ResetState();
 #endif
+<<<<<<< Updated upstream
     buffer_   = std::make_unique<buffer::BufferManager>(N_PAGES, PHYSICAL_CAP, EXTRA_NO_PG, EVICT_SIZE, is_running_);
     log_      = std::make_unique<recovery::LogManager>(is_running_);
     txn_man_  = std::make_unique<transaction::TransactionManager>(buffer_.get(), log_.get());
     recovery_ = std::make_unique<recovery::RecoveryManager>(buffer_.get());
+=======
+    FLAGS_blob_buffer_pool_gb = static_cast<int>(use_extent_tier_bm);
+    buffer_  = std::make_unique<buffer::BufferManager>(N_PAGES, PHYSICAL_CAP, EXTRA_NO_PG, EVICT_SIZE, is_running_);
+    blob_ = std::make_unique<storage::blob::BlobManager>(buffer_.get());
+    log_     = std::make_unique<recovery::LogManager>(is_running_);
+    txn_man_ = std::make_unique<transaction::TransactionManager>(buffer_.get(), log_.get());
+>>>>>>> Stashed changes
 
     // Allocate metadata page (page 0)
     buffer_->ConstructLocalRing();
@@ -87,6 +103,7 @@ class BaseTest : public ::testing::Test {
     is_running_ = false;
     txn_man_.reset();
     log_.reset();
+    blob_.reset();
     buffer_.reset();
     test_file_fd_ = 0;
   }

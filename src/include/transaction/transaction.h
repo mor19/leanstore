@@ -156,7 +156,7 @@ struct alignas(CPU_CACHELINE_SIZE) SerializableTransaction {
   ~SerializableTransaction() = default;
 
   void Construct(const Transaction &txn);
-  auto MemorySize() -> uoffset_t;
+  auto MemorySize() -> u64;
 
   static auto InvalidByteBuffer(const u8 *buffer) -> bool;
 

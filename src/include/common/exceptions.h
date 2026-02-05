@@ -30,6 +30,11 @@ class RestartException {
   RestartException() = default;
 };
 
+class SkippingRestartException {
+ public:
+  SkippingRestartException() = default;
+};
+
 }  // namespace leanstore::sync
 
 // Support Macros

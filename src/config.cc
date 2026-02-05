@@ -56,7 +56,7 @@ DEFINE_string(txn_default_isolation_level, "ru",
               "(ru: READ_UNCOMMITTED, rc: READ_COMMITTED, si: SNAPSHOT_ISOLATION, ser: SERIALIZABLE)");
 
 /* Configuration for commit processing subsystem */
-DEFINE_int32(txn_commit_variant, static_cast<int>(leanstore::transaction::CommitProtocol::AUTONOMOUS_COMMIT),
+DEFINE_int32(txn_commit_variant, static_cast<int>(leanstore::transaction::CommitProtocol::FLUSH_PIPELINING),
              "Which commit strategy to be used, see transaction::CommitProtocol"
              "See class leanstore::transaction::CommitProtocol for your information");
 DEFINE_uint32(txn_commit_group_size, 1,

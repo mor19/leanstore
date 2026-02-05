@@ -594,6 +594,7 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
 
   if (parent->header.right_most_child == node.PageID()) {
     // remove rightmost child by overwriting with second last child ptr
+    if (parent->header.count <= 1) { throw sync::SkippingRestartException{}; }
     parent->header.right_most_child = parent->GetChild(parent->header.count - 1);
     parent->RemoveSlot(parent->header.count - 1);
   } else {
@@ -606,18 +607,13 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
     }
   }
 
-  // check if parent is underfull -> merge upwards
-  if (parent->FreeSpaceAfterCompaction() >= BTreeNodeHeader::SIZE_UNDER_FULL) {
-    EnsureUnderfullInnersForMerge(parent.UnlockAndGetPtr());
-  }
-
   // store cold data
   std::vector<u8> tmp_row_ids;
   std::vector<std::vector<u8>> tmp_data;
   tmp_data.resize(column_sizes_.size());
   // read all children
   for (auto idx = 0; idx < node->header.count; idx++) {
-    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
+    ExclusiveGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
     for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
       // row id (also copy prefix!)
       u8 tmpRowIdBuffer[sizeof(u64)];
@@ -638,7 +634,7 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
     }
   }
   {
-    OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+    ExclusiveGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
     for (auto entry_idx = 0; entry_idx < rightmost_child.Ptr()->header.count; entry_idx++) {
       // row id (also copy prefix!)
       u8 tmpRowIdBuffer[sizeof(u64)];
@@ -661,8 +657,13 @@ void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp>
 
   // store cold data
   column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
+  // spdlog::info("stored {} cold tuples", tmp_row_ids.size() / 8);
 
   node.Unlock();
+  // check if parent is underfull -> merge upwards
+  if (parent->FreeSpaceAfterCompaction() >= BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL) {
+    EnsureUnderfullInnersForMerge(parent.UnlockAndGetPtr());
+  }
 }
 
 void ExtendedBTree::MoveHotDataToColdData() {
@@ -676,54 +677,66 @@ void ExtendedBTree::MoveHotDataToColdData() {
       std::time(&current_time);
       leng_t count = root->header.count;
       for (leng_t i = 0; i < count; i++) {
-        OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_), meta);
+        OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_));
         OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, root->GetChild(i));
         if (!child->IsInner()) { return; }
         // start iterating from root
-        IterateLeafParents(child, root, current_time);
+        IterateLeafParents(child.PageID(), root.PageID(), current_time);
       }
       return;
-    } catch (const sync::RestartException &) {}
+    } catch (const sync::RestartException &) {
+    } catch (const sync::SkippingRestartException) { return; }
   }
 }
 
-void ExtendedBTree::IterateLeafParents(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
-                                       OptimisticGuard<BTreeNodeWithTimeStamp> &parent, time_t current_time) {
+void ExtendedBTree::IterateLeafParents(pageid_t nodeId, pageid_t parentId, time_t current_time) {
+  // not threadsafe!!!
+  ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(buffer_, parentId);
+  ExclusiveGuard<BTreeNodeWithTimeStamp> node(buffer_, nodeId);
   if (!node->IsInner()) return;
-  OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->header.right_most_child);
+  std::vector<pageid_t> toCheck;
   for (leng_t i = 0; i < node->header.count; i++) {
-    OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
-
+    ExclusiveGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
     if (!child->IsInner()) {
       // leaf parent -> check time in rightmost child node
-      OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
-      ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
-      ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
+      ExclusiveGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
       if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
         // data is expired -> move to cold data
-        RemoveInnerNode(std::move(parent_locked), std::move(node_locked));
+        child.Unlock();
+        rightmost_child.Unlock();
+        RemoveInnerNode(std::move(parent_locked), std::move(node));
         throw sync::RestartException{};
       }
       return;
     } else {
-      IterateLeafParents(child, node, current_time);
+      toCheck.push_back(child.PageID());
+      child.Unlock();
     }
   }
 
   // rightmost child
-  if (!child->IsInner()) {
-    // leaf parent -> check time
-    OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
-    ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(std::move(parent));
-    ExclusiveGuard<BTreeNodeWithTimeStamp> node_locked(std::move(node));
-    if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
-      // data is expired -> move to cold data
-      RemoveInnerNode(std::move(parent_locked), std::move(node_locked));
-      throw sync::RestartException{};
+  {
+    ExclusiveGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+    if (!rightmost_child->IsInner()) {
+      // leaf parent -> check time
+      if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
+        // data is expired -> move to cold data
+        rightmost_child.Unlock();
+
+        RemoveInnerNode(std::move(parent_locked), std::move(node));
+        throw sync::RestartException{};
+      }
+      return;
+    } else {
+      toCheck.push_back(rightmost_child.PageID());
+      rightmost_child.Unlock();  // redundant
     }
-  } else {
-    IterateLeafParents(child, node, current_time);
   }
+
+  // iterate children
+  parent_locked.Unlock();
+  node.Unlock();
+  for (pageid_t pageId : toCheck) { IterateLeafParents(pageId, nodeId, current_time); }
 }
 
 }  // namespace leanstore::storage

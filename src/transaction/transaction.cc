@@ -44,7 +44,7 @@ auto SerializableTransaction::DepGSN() const -> std::span<const timestamp_t> {
 auto SerializableTransaction::InvalidByteBuffer(const u8 *buffer) -> bool { return buffer[0] == NULL_ITEM; }
 
 /* Should be in-sync with Transaction::SerializedSize() */
-auto SerializableTransaction::MemorySize() -> u16 {
+auto SerializableTransaction::MemorySize() -> u64 {
   auto vector_mem_size = (FLAGS_wal_variant != LoggingVariant::VECTOR) ? 0 : Transaction::VECTOR_KEY_SIZE * vector_size;
   auto ret = sizeof(SerializableTransaction) + vector_mem_size + no_write_pages * sizeof(storage::LargePage) +
              no_evict_extents * sizeof(pageid_t) + no_free_extents * sizeof(storage::ExtentTier);

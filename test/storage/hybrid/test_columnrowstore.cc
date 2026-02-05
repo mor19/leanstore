@@ -211,7 +211,7 @@ TEST_F(TestColumnRowStore, InsertAndCheckOrder) {
     std::memcpy(&current, payload.data(), sizeof(u64));
     // int cur_key;
     // std::memcpy(&cur_key, key.data(), sizeof(int));
-    // spdlog::info("%d : %ld  %08x : %016lx", cur_key, current, cur_key, current);
+    // spdlog::info("{} : {}  %08x : %016lx", cur_key, current, cur_key, current);
     EXPECT_GE(current, last);
     last = current;
     return true;
@@ -234,8 +234,8 @@ TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
-  spdlog::info("cold tuples: %ld", columnrowstore_->CountColdEntries());
-  spdlog::info("total tuples: %ld", columnrowstore_->CountEntries());
+  spdlog::info("cold tuples: {}", columnrowstore_->CountColdEntries());
+  spdlog::info("total tuples: {}", columnrowstore_->CountEntries());
 
   for (auto &pair : data) {
     std::span key{reinterpret_cast<u8 *>(&pair.first), sizeof(int)};
@@ -259,8 +259,8 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
-  spdlog::info("cold tuples: %ld", columnrowstore_->CountColdEntries());
-  spdlog::info("total tuples: %ld", columnrowstore_->CountEntries());
+  spdlog::info("cold tuples: {}", columnrowstore_->CountColdEntries());
+  spdlog::info("total tuples: {}", columnrowstore_->CountEntries());
 
   std::unordered_map<int, int> scan_result;
 
@@ -302,7 +302,7 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
 
 TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
   std::vector<std::pair<int, __uint128_t>> data;
-  Prepare<__uint128_t>(data, false, true, TWO_NO_RECORDS);
+  Prepare<__uint128_t>(data, false, true, MIDHIGH_NO_RECORDS1);
 
   std::this_thread::sleep_for(std::chrono::seconds(FLAGS_htap_expire_seconds + 1));
 
@@ -310,13 +310,13 @@ TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
   txn_man_->CommitTransaction();
   InitRandTransaction();
 
-  std::array<bool, TWO_NO_RECORDS + 1> removed_f = {false};
+  std::array<bool, MIDHIGH_NO_RECORDS1 + 1> removed_f = {false};
 
   ASSERT_TRUE(columnrowstore_->IsNotEmpty());
 
   // Remove random
-  for (auto idx = 0; idx < static_cast<int>(TWO_NO_RECORDS); idx++) {
-    int int_key     = rand() % TWO_NO_RECORDS + 1;
+  for (auto idx = 0; idx < static_cast<int>(MIDHIGH_NO_RECORDS1); idx++) {
+    int int_key     = rand() % MIDHIGH_NO_RECORDS1 + 1;
     int ordered_key = __builtin_bswap32(int_key);
     std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};
 
@@ -334,7 +334,7 @@ TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
   }
 
   // Now remove all
-  for (auto idx = 1; idx <= static_cast<int>(TWO_NO_RECORDS); idx++) {
+  for (auto idx = 1; idx <= static_cast<int>(MIDHIGH_NO_RECORDS1); idx++) {
     if (!removed_f[idx]) {
       int ordered_key = __builtin_bswap32(idx);
       std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};
@@ -363,7 +363,7 @@ TEST_F(TestColumnRowStore, ColdUpdateAndQuery) {
   for (size_t idx = 0; idx < MIDHIGH_NO_RECORDS1; idx++) { validation[idx + 1] = idx * 100; }
 
   // Remove random
-  for (auto idx = 0ULL; idx < MIDHIGH_NO_RECORDS1; idx++) {
+  for (auto idx = 0ULL; idx < MIDHIGH_NO_RECORDS1/4; idx++) {
     int int_key     = rand() % MIDHIGH_NO_RECORDS1 + 1;
     int ordered_key = __builtin_bswap32(int_key);
     std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};

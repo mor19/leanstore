@@ -30,12 +30,11 @@ ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobMan
 }
 
 /* config*/
-void ColumnRowStore::ToggleAppendBiasMode(bool append_bias) { this->hot_data.ToggleAppendBiasMode(append_bias); }
 
 void ColumnRowStore::SetComparisonOperator(ComparisonLambda cmp) { this->hot_data.SetComparisonOperator(cmp); }
 
 /* public apis*/
-auto ColumnRowStore::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bool {
+auto ColumnRowStore::LookUp(std::span<u8> key, const AccessPayloadFunc &read_cb) -> bool {
   // get row id
   u64 row_id;
   if (!row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); })) {
@@ -116,7 +115,7 @@ auto ColumnRowStore::Remove(std::span<u8> key) -> bool {
   return this->InternalRemove(row_id);
 }
 
-auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, const PayloadFunc &func) -> bool {
+auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, const AccessPayloadFunc &func) -> bool {
   // get row id
   u64 row_id;
   if (!row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); })) {
@@ -137,7 +136,7 @@ auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, cons
 /**
  * func is used to modidy the current payload; delta is ignored! (does also update out of place!)
  */
-auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool {
+auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const ModifyPayloadFunc &func, FixedSizeDelta *delta) -> bool {
   // get row id
   u64 row_id;
   if (!row_id_index.LookUp(key, [&](std::span<u8> pl) { std::memcpy(&row_id, pl.data(), sizeof(u64)); })) {
@@ -366,7 +365,7 @@ auto ColumnRowStore::CountColdEntries() -> u64 {
 
 auto ColumnRowStore::SizeInMB() -> float { return CountPages() * static_cast<float>(PAGE_SIZE) / MB; }
 
-auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
+auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
   -> bool {
   // get row id
   u64 row_id;

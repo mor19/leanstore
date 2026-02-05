@@ -43,8 +43,6 @@ ExtendedBTree::ExtendedBTree(buffer::BufferManager *buffer_pool, ColumnRowStore 
   root_page.AdvanceGSN();
 }
 
-void ExtendedBTree::ToggleAppendBiasMode(bool append_bias) { append_bias_ = append_bias; }
-
 void ExtendedBTree::SetComparisonOperator(ComparisonLambda cmp_op) { cmp_lambda_ = cmp_op; }
 
 auto ExtendedBTree::IterateAllNodes(OptimisticGuard<BTreeNodeWithTimeStamp> &node,
@@ -257,7 +255,7 @@ void ExtendedBTree::EnsureUnderfullInnersForMerge(BTreeNodeWithTimeStamp *to_mer
   }
 }
 
-auto ExtendedBTree::LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bool {
+auto ExtendedBTree::LookUp(std::span<u8> key, const AccessPayloadFunc &read_cb) -> bool {
   while (true) {
     try {
       OptimisticGuard<BTreeNodeWithTimeStamp> node = FindLeafOptimistic(key);
@@ -374,7 +372,7 @@ auto ExtendedBTree::Remove(std::span<u8> key) -> bool {
  *
  * If `func` is provided, then func(previous payload) is triggered
  */
-auto ExtendedBTree::Update(std::span<u8> key, std::span<const u8> payload, const PayloadFunc &func) -> bool {
+auto ExtendedBTree::Update(std::span<u8> key, std::span<const u8> payload, const AccessPayloadFunc &func) -> bool {
   assert((key.size() + payload.size()) <= BTreeNodeWithTimeStamp::MAX_RECORD_SIZE);
 
   while (true) {
@@ -425,7 +423,7 @@ auto ExtendedBTree::Update(std::span<u8> key, std::span<const u8> payload, const
   }
 }
 
-auto ExtendedBTree::UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool {
+auto ExtendedBTree::UpdateInPlace(std::span<u8> key, const ModifyPayloadFunc &func, FixedSizeDelta *delta) -> bool {
   while (true) {
     try {
       auto node = FindLeafOptimistic(key);
@@ -534,7 +532,7 @@ auto ExtendedBTree::SizeInMB() -> float { return CountPages() * static_cast<floa
  * @brief Only used for Blob Handler indexes.
  * Similar to LookUp operator, but for Byte String as key
  */
-auto ExtendedBTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
+auto ExtendedBTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
   -> bool {
   Ensure(cmp_lambda_.op == ComparisonOperator::BLOB_HANDLER);
   Ensure(cmp.op == ComparisonOperator::BLOB_LOOKUP);

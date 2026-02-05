@@ -214,6 +214,5 @@ static_assert(sizeof(BTreeNode) == PAGE_SIZE);
 static_assert(BTreeNode::MAX_RECORD_SIZE > 1.2 * KB);
 static_assert(blob::BlobState::MAX_MALLOC_SIZE <= BTreeNode::MAX_RECORD_SIZE);
 static_assert(sizeof(BTreeNodeWithTimeStamp) == PAGE_SIZE);
-static_assert(sizeof(InMemoryBTreeNode) == PAGE_SIZE);
 
 }  // namespace leanstore::storage

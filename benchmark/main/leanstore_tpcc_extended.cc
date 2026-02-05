@@ -31,12 +31,6 @@ auto main(int argc, char **argv) -> int {
   auto db   = std::make_unique<leanstore::LeanStore>();
   auto tpcc = std::make_unique<tpcc::TPCCWorkloadExtended<LeanStoreAdapter>>(
     FLAGS_tpcc_warehouse_count, true, true, true, static_cast<double>(FLAGS_txn_rate) / FLAGS_worker_count, *db);
-  tpcc->customer.ToggleAppendBiasMode(true);
-  tpcc->history.ToggleAppendBiasMode(true);
-  tpcc->order.ToggleAppendBiasMode(true);
-  tpcc->orderline.ToggleAppendBiasMode(true);
-  tpcc->item.ToggleAppendBiasMode(true);
-  tpcc->stock.ToggleAppendBiasMode(true);
 
   // TPC-C loader
   db->worker_pool.ScheduleSyncJob(0, [&]() {

@@ -181,7 +181,7 @@ void LeanStoreAdapter<RecordBase>::RemoveBlob(u8 *blob_handler) {
 
 template <class RecordBase>
 auto LeanStoreAdapter<RecordBase>::LookUpBlob(std::span<u8> blob_payload,
-                                              const typename Adapter<RecordBase>::AccessRecordFunc &fn) -> bool {
+                                              const typename Adapter<RecordBase>::AccessPayloadFunc &fn) -> bool {
   auto success =
     tree_->LookUpBlob(blob_payload, db_->RetrieveComparisonFunc(leanstore::ComparisonOperator::BLOB_LOOKUP),
                       [&](std::span<const u8> payload) { fn(*reinterpret_cast<const RecordBase *>(payload.data())); });

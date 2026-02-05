@@ -30,22 +30,21 @@ class ExtendedBTree : public KVInterface {
   ~ExtendedBTree() override = default;
 
   /* ExtendedBTree config*/
-  void ToggleAppendBiasMode(bool append_bias) override;
   void SetComparisonOperator(ComparisonLambda cmp) override;
 
   /* All ExtendedBTree operators */
   // -------------------------------------------------------------------------------------
   /* Public APIs for external use */
-  auto LookUp(std::span<u8> key, const PayloadFunc &read_cb) -> bool override;
+  auto LookUp(std::span<u8> key, const AccessPayloadFunc &read_cb) -> bool override;
   void Insert(std::span<u8> key, std::span<const u8> payload) override;
   auto Remove(std::span<u8> key) -> bool override;
-  auto Update(std::span<u8> key, std::span<const u8> payload, const PayloadFunc &func) -> bool override;
-  auto UpdateInPlace(std::span<u8> key, const PayloadFunc &func, FixedSizeDelta *delta) -> bool override;
+  auto Update(std::span<u8> key, std::span<const u8> payload, const AccessPayloadFunc &func) -> bool override;
+  auto UpdateInPlace(std::span<u8> key, const ModifyPayloadFunc &func, FixedSizeDelta *delta) -> bool override;
   void ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) override;
   void ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) override;
   auto CountEntries() -> u64 override;
   auto SizeInMB() -> float override;
-  auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const PayloadFunc &read_cb)
+  auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
     -> bool override;
   void MoveHotDataToColdData();
 

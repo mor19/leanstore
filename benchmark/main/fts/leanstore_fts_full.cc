@@ -31,7 +31,6 @@ auto main(int argc, char **argv) -> int {
   auto db = std::make_unique<leanstore::LeanStore>();
   auto fts =
     std::make_unique<fts::FTSWorkload<LeanStoreAdapter>>(static_cast<double>(FLAGS_txn_rate) / FLAGS_worker_count, *db);
-  fts->orderline.ToggleAppendBiasMode(true);
 
   // TPC-C loader
   for (Integer w_id = 1; w_id <= static_cast<Integer>(FLAGS_fts_warehouse_count); w_id++) {

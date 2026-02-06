@@ -18,7 +18,7 @@
 template <class RecordBase>
 LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db, std::vector<u32> columnSizes)
     : relation_(static_cast<std::type_index>(typeid(RecordBase))), db_(&db) {
-  db_->RegisterTable(relation_, RecordBase::TYPE_ID, columnSizes);  // TYPE_ID is a part of the LeanStore stupid catalog
+  db_->RegisterTable(relation_, RecordBase::TYPE_ID*2, columnSizes);  // TYPE_ID is a part of the LeanStore stupid catalog (*2 since 2 trees are required for the ColumnRowStore)
   tree_ = db_->RetrieveIndex(relation_);
 }
 

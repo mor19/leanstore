@@ -80,7 +80,7 @@ auto main(int argc, char **argv) -> int {
         int w_id =
           (FLAGS_fts_warehouse_affinity) ? GetRandomWarehouseId(thread_id) : UniformRand(1, FLAGS_fts_warehouse_count);
         int d_id = UniformRand(1, fts->D_PER_WH);
-        db->StartTransaction(fts->NextTransactionArrivalTime([&]() { db->CheckDuringIdle(); }));
+        db->StartTransaction();
         fts->GetRevenueInDistrict(w_id, d_id);
         db->CommitTransaction();
       }

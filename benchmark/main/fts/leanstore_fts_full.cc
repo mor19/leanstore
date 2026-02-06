@@ -65,7 +65,7 @@ auto main(int argc, char **argv) -> int {
       fts->InitializeThread();
       for (auto i = 0U; i < FLAGS_fts_run_queries_count; i++) {
         // select random order
-        db->StartTransaction(fts->NextTransactionArrivalTime([&]() { db->CheckDuringIdle(); }));
+        db->StartTransaction();
         fts->GetTotalRevenue();
         db->CommitTransaction();
       }

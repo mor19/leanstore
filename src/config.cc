@@ -25,14 +25,14 @@ DEFINE_bool(bm_enable_fair_eviction, true,
 // -----------------------------------------------------------------------------------
 /* Write-ahead logging */
 DEFINE_bool(wal_enable, true, "Whether to enable WAL logging or not");
-DEFINE_uint32(wal_variant, 2,
+DEFINE_uint32(wal_variant, 1,
               "Which variant of decentralized logging is being used"
               "0. Original Global Sequence Number variant from Tianzheng Wang"
               "1. The Remote-Flush-Avoidance variant by Michael Haubenschild"
               "2. The GSN-vector proposal");
 DEFINE_bool(wal_debug, false, "Enable debugging for WAL ops");
 DEFINE_bool(wal_fsync, false, "Force FSync for WAL");
-DEFINE_uint64(wal_buffer_size_mb, 10, "Size of WAL log buffer in MB");
+DEFINE_uint64(wal_buffer_size_mb, 10, "Size of WAL log buffer in MB");  // default 10
 
 /* Configuration for commit protocols */
 DEFINE_uint32(wal_batch_write_kb, 4,
@@ -62,10 +62,10 @@ DEFINE_int32(txn_commit_variant, static_cast<int>(leanstore::transaction::Commit
 DEFINE_uint32(txn_commit_group_size, 1,
               "The size (number of workers) of the commit group, in which workers of the same group can:"
               "- Workers in the same group trigger commit for the whole group directly");
-DEFINE_uint32(txn_queue_size_mb, 10, "The transaction queue size in MB");
+DEFINE_uint32(txn_queue_size_mb, 10, "The transaction queue size in MB");  // default 10
 // -----------------------------------------------------------------------------------
 /* BLOB */
-DEFINE_bool(blob_enable, false, "Whether to enable Blob functionalities");
+DEFINE_bool(blob_enable, true, "Whether to enable Blob functionalities");
 DEFINE_bool(blob_tail_extent, true, "Whether to enable Tail Extent or not");
 DEFINE_bool(blob_normal_buffer_pool, true,
             "Extra overheads to emulate normal buffer pool, should be enabled during development"

@@ -1,5 +1,6 @@
 #include "benchmark/adapters/leanstore_adapter.h"
 #include "benchmark/tpcc/config.h"
+#include "benchmark/tpcc_extended/config.h"
 #include "benchmark/tpcc_extended/workload_extended.h"
 #include "leanstore/leanstore.h"
 
@@ -79,37 +80,48 @@ auto main(int argc, char **argv) -> int {
     db->CommitTransaction();
   });
 #endif
-
-  // move hot to cold data
-  // TODO(moritz)
-
   // extended TPC-C execution
+  double scanDuration = 0;
   db->StartProfilingThread();
-  ctrl.StartPerfRuntime();
-  e.startCounters();
-
-  for (auto t_id = 0U; t_id < FLAGS_worker_count; t_id++) {
-    db->worker_pool.ScheduleAsyncJob(t_id, [&, thread_id = t_id]() {
+  for (auto turn = 0U; turn < 10; turn++) {
+    // TPC-C
+    db->worker_pool.ScheduleSyncJob(0, [&]() {
       tpcc->InitializeThread();
 
-      while (keep_running.load()) {
-        int w_id = (FLAGS_tpcc_warehouse_affinity) ? (thread_id % FLAGS_tpcc_warehouse_count) + 1
-                                                   : UniformRand(1, FLAGS_tpcc_warehouse_count);
-        db->StartTransaction(tpcc->NextTransactionArrivalTime([&]() { db->CheckDuringIdle(); }));
+      for (auto i = 0U; i < FLAGS_tpcc_extended_tpcc_operations; i++) {
+        int w_id = UniformRand(1, FLAGS_tpcc_warehouse_count);
+        db->StartTransaction();
         tpcc->ExecuteTransaction(w_id);
         db->CommitTransaction();
       }
     });
+#ifdef DEBUG
+    spdlog::debug("tpcc operations done. moving hot to cold data");
+#endif
+    // move hot to cold data
+    std::this_thread::sleep_for(std::chrono::seconds(FLAGS_htap_expire_seconds + 1));
+    db->worker_pool.ScheduleSyncJob(0, [&]() {
+      tpcc->InitializeThread();
+      db->StartTransaction();
+      for (auto &[type, ptr] : db->indexes) { ptr->ConvertHotDataToColdData(); }
+      db->CommitTransaction();
+    });
+#ifdef DEBUG
+    spdlog::debug("moving hot to cold data done. ");
+#endif
+    // scan (measure time!)
+    ctrl.StartPerfRuntime();
+    e.startCounters();
+    db->worker_pool.ScheduleSyncJob(0, [&]() {
+      db->StartTransaction();
+      tpcc->Query2();
+      db->CommitTransaction();
+    });
+    e.stopCounters();
+    scanDuration += e.getDuration();
+    ctrl.StopPerfRuntime();
   }
-
-  // Run for a few seconds, then quit
-  std::this_thread::sleep_for(std::chrono::seconds(FLAGS_tpcc_exec_seconds));
-  keep_running = false;
-  ctrl.StopPerfRuntime();
   db->Shutdown();
   spdlog::info("Space used: {:.4f} GB - WAL size: {:.4f} GB", db->AllocatedSize(), db->WALSize() - initial_wal_size);
-  e.stopCounters();
-  e.printReport(std::cout, leanstore::statistics::total_committed_txn);
-  spdlog::info("scan: {:.4f} tuples/s",
-               leanstore::statistics::total_scanned_tuples.load() / static_cast<double>(FLAGS_tpcc_exec_seconds));
+  spdlog::info("scan: {:.4f} tuples/s", leanstore::statistics::total_scanned_tuples.load() / scanDuration);
 }

@@ -63,8 +63,7 @@ auto main(int argc, char **argv) -> int {
   for (auto t_id = 0U; t_id < FLAGS_worker_count; t_id++) {
     db->worker_pool.ScheduleAsyncJob(t_id, [&, thread_id = t_id]() {
       fts->InitializeThread();
-      for (auto i = 0U; i < FLAGS_fts_run_queries_count; i++) {
-        // select random order
+      for (auto i = 0U; i < FLAGS_fts_run_queries_count_multiplier; i++) {
         db->StartTransaction();
         fts->GetTotalRevenue();
         db->CommitTransaction();
@@ -75,7 +74,7 @@ auto main(int argc, char **argv) -> int {
   db->worker_pool.JoinAll();
   ctrl.StopPerfRuntime();
   db->Shutdown();
-  spdlog::info("executed full query {} times on {} worker threads", FLAGS_fts_run_queries_count, FLAGS_worker_count);
+  spdlog::info("executed full query {} times on {} worker threads", FLAGS_fts_run_queries_count_multiplier, FLAGS_worker_count);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
   spdlog::info("scan: {:.4f} tuples/s", leanstore::statistics::total_scanned_tuples.load() / e.getDuration());

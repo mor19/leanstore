@@ -172,8 +172,8 @@ void ColumnRowStore::ScanDescending(std::span<u8> key, const AccessRecordFunc &f
 void ColumnRowStore::ConvertHotDataToColdData() {
   hot_data.MoveHotDataToColdData();
 #ifdef DEBUG
-  spdlog::debug("{}/{} cold/total tuples (deactivate this for benchmarking!!!)", CountColdEntries(),
-                CountColdEntries());
+  spdlog::debug("{}/{} cold/total tuples (deactivate this message for benchmarking!!!)", CountColdEntries(),
+                CountEntries());
 #endif
 }
 

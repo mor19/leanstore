@@ -75,7 +75,7 @@ auto main(int argc, char **argv) -> int {
   for (auto t_id = 0U; t_id < FLAGS_worker_count; t_id++) {
     db->worker_pool.ScheduleAsyncJob(t_id, [&, thread_id = t_id]() {
       fts->InitializeThread();
-      for (auto i = 0U; i < FLAGS_fts_run_queries_count; i++) {
+      for (auto i = 0U; i < FLAGS_fts_run_queries_count_multiplier * 100; i++) {
         // select random order
         int w_id =
           (FLAGS_fts_warehouse_affinity) ? GetRandomWarehouseId(thread_id) : UniformRand(1, FLAGS_fts_warehouse_count);
@@ -91,7 +91,8 @@ auto main(int argc, char **argv) -> int {
   db->worker_pool.JoinAll();
   ctrl.StopPerfRuntime();
   db->Shutdown();
-  spdlog::info("executed small query {} times on {} worker threads", FLAGS_fts_run_queries_count, FLAGS_worker_count);
+  spdlog::info("executed small query {} times on {} worker threads", FLAGS_fts_run_queries_count_multiplier,
+               FLAGS_worker_count);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
   spdlog::info("scan: {:.4f} tuples/s", leanstore::statistics::total_scanned_tuples.load() / e.getDuration());

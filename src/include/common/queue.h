@@ -20,7 +20,7 @@ namespace leanstore {
 template <typename T>
 class LockFreeQueue {
  public:
-  static constexpr uoffset_t NULL_SIZE = std::numeric_limits<uoffset_t>::max();
+  static constexpr auto NULL_SIZE = std::numeric_limits<uoffset_t>::max();
 
   LockFreeQueue();
   ~LockFreeQueue();
@@ -32,6 +32,7 @@ class LockFreeQueue {
    */
   template <typename T2>
   void Push(const T2 &element) {
+    assert(element.SerializedSize() < NULL_SIZE);
     auto item_size = static_cast<uoffset_t>(element.SerializedSize());
     auto w_tail    = tail_.load();
 

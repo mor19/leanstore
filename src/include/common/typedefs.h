@@ -39,5 +39,5 @@ using txnid_t     = timestamp_t;  // txn id is actually the start ts of that txn
 using wid_t       = u16;          // Worker ID
 // -------------------------------------------------------------------------------------
 using leng_t    = u16;
-using uoffset_t = u16;
+using uoffset_t = u32;
 // -------------------------------------------------------------------------------------

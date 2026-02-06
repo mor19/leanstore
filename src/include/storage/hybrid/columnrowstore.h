@@ -59,7 +59,6 @@ class ColumnRowStore : public HKVInterface {
   void StoreColdData(std::vector<u8> &rowIds, std::vector<std::vector<u8>> &data);
 
  private:
-  // TODO(moritz)
   bool InternalRemove(u64 row_id);
   ColumnChunk *FindChunkInColdData(u64 row_id);
 

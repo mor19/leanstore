@@ -10,7 +10,7 @@
 namespace tpcc {
 
 struct NationType {
-  static constexpr uint32_t TYPE_ID = 10;
+  static constexpr uint32_t TYPE_ID = 11;
 
   struct Key {
     Integer n_nationkey;
@@ -39,7 +39,7 @@ struct NationType {
 };
 
 struct RegionType {
-  static constexpr uint32_t TYPE_ID = 11;
+  static constexpr uint32_t TYPE_ID = 12;
 
   struct Key {
     Integer r_regionkey;
@@ -67,7 +67,7 @@ struct RegionType {
 };
 
 struct SupplierType {
-  static constexpr uint32_t TYPE_ID = 12;
+  static constexpr uint32_t TYPE_ID = 13;
 
   struct Key {
     Integer su_suppkey;

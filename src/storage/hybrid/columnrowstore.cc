@@ -124,7 +124,7 @@ auto ColumnRowStore::Update(std::span<u8> key, std::span<const u8> payload, cons
     return false;
   }
   // trigger func with old payload if exists
-  if (func) { this->hot_data.LookUp(U64ToSpanU8(row_id), func); }
+  if (func) { this->LookUp(key, func); }
   // update = insert (without updating the row id of key) + delete old + update row-id index
   u64 new_row_id = next_row_id.fetch_add(1);
   new_row_id     = __builtin_bswap64(new_row_id);  // swap for memcmp sort compability
@@ -149,8 +149,7 @@ auto ColumnRowStore::UpdateInPlace(std::span<u8> key, const ModifyPayloadFunc &f
   new_row_id     = __builtin_bswap64(new_row_id);  // swap for memcmp sort compability
   // apply fixed delta update to copy
   std::vector<u8> temp;
-  this->hot_data.LookUp(U64ToSpanU8(row_id),
-                        [&temp](std::span<u8> payload) { temp.assign(payload.begin(), payload.end()); });
+  this->LookUp(key, [&temp](std::span<u8> payload) { temp.assign(payload.begin(), payload.end()); });
   // apply func
   func({temp.data(), temp.size()});
   // IGNORING DELTA (because it is for delta logging)
@@ -206,7 +205,6 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
             std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
           // row id in the already loaded blob
-          //
         } else {
           // new chunk needs to be loaded
           if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
@@ -282,7 +280,6 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
             std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
           // row id in the already loaded blob
-          //
         } else {
           // new chunk needs to be loaded
           if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }

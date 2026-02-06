@@ -1,16 +1,17 @@
 #include "benchmark/adapters/leanstore_adapter.h"
+#include <span>
 #include "benchmark/filebench/webserver/schema.h"
+#include "benchmark/fts/schema.h"
 #include "benchmark/fuse/schema.h"
 #include "benchmark/gitclone/schema.h"
 #include "benchmark/tatp/schema.h"
 #include "benchmark/tpcc/schema.h"
+#include "benchmark/tpcc_extended/schema_extended.h"
 #include "benchmark/utils/test_utils.h"
 #include "benchmark/wikipedia/schema.h"
 #include "benchmark/ycsb/schema.h"
 #include "leanstore/schema.h"
-#include "benchmark/tpcc_extended/schema_extended.h"
-#include "benchmark/fts/schema.h"
-#include <span>
+#include "leanstore/statistics.h"
 
 template <class RecordBase>
 LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db)
@@ -29,11 +30,12 @@ void LeanStoreAdapter<RecordBase>::ScanImpl(const typename RecordBase::Key &r_ke
                                             const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
                                             bool scan_ascending) {
   u8 key[RecordBase::MaxFoldLength()];
-  auto len = RecordBase::FoldKey(key, r_key);
-
-  auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
+  auto len               = RecordBase::FoldKey(key, r_key);
+  u64 tmp_scanned_tuples = 0;
+  auto read_cb           = [&](std::span<u8> key, std::span<u8> payload) -> bool {
     typename RecordBase::Key typed_key;
     RecordBase::UnfoldKey(key.data(), typed_key);
+    tmp_scanned_tuples++;
     return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
   };
 
@@ -42,6 +44,7 @@ void LeanStoreAdapter<RecordBase>::ScanImpl(const typename RecordBase::Key &r_ke
   } else {
     tree_->ScanDescending({key, len}, read_cb);
   }
+  leanstore::statistics::total_scanned_tuples += tmp_scanned_tuples;
 }
 
 template <class RecordBase>

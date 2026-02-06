@@ -43,9 +43,9 @@ struct TPCCWorkloadExtended : public TPCCWorkload<AdapterType> {
       : TPCCWorkload<AdapterType>(warehouse_count, enable_order_wdc_index, enable_cross_warehouses,
                                   manually_handle_isolation_anomalies, txn_rate_per_worker,
                                   std::forward<Params>(params)...),
-        nation(AdapterType<NationType>(std::forward<Params>(params)..., NationType::ColumnSizes())),
-        region(AdapterType<RegionType>(std::forward<Params>(params)..., RegionType::ColumnSizes())),
-        supplier(AdapterType<SupplierType>(std::forward<Params>(params)..., SupplierType::ColumnSizes())) {}
+        nation(AdapterType<NationType>(std::forward<Params>(params)... )),
+        region(AdapterType<RegionType>(std::forward<Params>(params)...)),
+        supplier(AdapterType<SupplierType>(std::forward<Params>(params)...)) {}
 
   // -------------------------------------------------------------------------------------
   // extra data loading

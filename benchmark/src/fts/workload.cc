@@ -12,53 +12,44 @@ namespace fts {
 template <template <typename> class AdapterType>
 Numeric FTSWorkload<AdapterType>::GetOrderTotalPrice(Integer w_id, Integer d_id, Integer o_id) {
   Numeric orderTotalPrice = 0.0;
-  this->orderline.ScanOptimized(
-    {w_id, d_id, o_id, 0}, {4},
-    [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
-      if (ol_key.ol_w_id == w_id && ol_key.ol_d_id == d_id && ol_key.ol_o_id == o_id) {
-        // sum up all amounts (ol_quantity * i_price) of order lines that are in warehouse w_id and in district d_id and
-        // order o_id to get the total price of thus order
-        orderTotalPrice = orderTotalPrice + ol_rec.ol_amount;
-        return true;
-      } else {
-        return false;
-      }
-    },
-    true);
+  this->orderline.Scan({w_id, d_id, o_id, 0}, [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
+    if (ol_key.ol_w_id == w_id && ol_key.ol_d_id == d_id && ol_key.ol_o_id == o_id) {
+      // sum up all amounts (ol_quantity * i_price) of order lines that are in warehouse w_id and in district d_id and
+      // order o_id to get the total price of thus order
+      orderTotalPrice = orderTotalPrice + ol_rec.ol_amount;
+      return true;
+    } else {
+      return false;
+    }
+  });
   return orderTotalPrice;
 }
 
 template <template <typename> class AdapterType>
 Numeric FTSWorkload<AdapterType>::GetRevenueInDistrict(Integer w_id, Integer d_id) {
   Numeric districtRevenue = 0.0;
-  this->orderline.ScanOptimized(
-    {w_id, d_id, 0, 0}, {4},
-    [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
-      if (ol_key.ol_w_id == w_id && ol_key.ol_d_id == d_id) {
-        // sum up all amounts (ol_quantity * i_price) of order lines that are in warehouse w_id and in district d_id to
-        // get the district revenue
-        districtRevenue = districtRevenue + ol_rec.ol_amount;
-        return true;
-      } else {
-        return false;
-      }
-    },
-    true);
+  this->orderline.Scan({w_id, d_id, 0, 0}, [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
+    if (ol_key.ol_w_id == w_id && ol_key.ol_d_id == d_id) {
+      // sum up all amounts (ol_quantity * i_price) of order lines that are in warehouse w_id and in district d_id to
+      // get the district revenue
+      districtRevenue = districtRevenue + ol_rec.ol_amount;
+      return true;
+    } else {
+      return false;
+    }
+  });
   return districtRevenue;
 }
 
 template <template <typename> class AdapterType>
 Numeric FTSWorkload<AdapterType>::GetTotalRevenue() {
   Numeric totalRevenue = 0.0;
-  this->orderline.ScanOptimized(
-    {0, 0, 0, 0}, {4},
-    [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
-      (void)ol_key;
-      // sum up all amounts (ol_quantity * i_price) of all order lines to get the total revenue
-      totalRevenue = totalRevenue + ol_rec.ol_amount;
-      return true;
-    },
-    true);
+  this->orderline.Scan({0, 0, 0, 0}, [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
+    (void)ol_key;
+    // sum up all amounts (ol_quantity * i_price) of all order lines to get the total revenue
+    totalRevenue = totalRevenue + ol_rec.ol_amount;
+    return true;
+  });
   return totalRevenue;
 }
 

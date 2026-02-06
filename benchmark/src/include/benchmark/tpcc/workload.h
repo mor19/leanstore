@@ -159,7 +159,7 @@ struct TPCCWorkload {
 
   // -------------------------------------------------------------------------------------
   void InitializeThread();
-  auto ExecuteTransaction(Integer w_id) -> int;
+  virtual auto ExecuteTransaction(Integer w_id) -> int;
   auto NextTransactionArrivalTime(const std::function<void()> &idle_fn) -> uint64_t;
 };
 

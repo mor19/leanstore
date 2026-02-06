@@ -95,7 +95,7 @@ struct FTSWorkload {
   // Constructor
   template <typename... Params>
   FTSWorkload(double txn_rate_per_worker, Params &&...params)
-      : orderline(AdapterType<OrderLineType>(std::forward<Params>(params)..., OrderLineType::ColumnSizes())),
+      : orderline(AdapterType<OrderLineType>(std::forward<Params>(params)...)),
         scheduler(txn_rate_per_worker) {}
 
   // -------------------------------------------------------------------------------------

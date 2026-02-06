@@ -2,6 +2,7 @@
 #include "benchmark/tpcc/config.h"
 #include "benchmark/tpcc_extended/config.h"
 #include "benchmark/tpcc_extended/workload_extended.h"
+#include "leanstore/env.h"
 #include "leanstore/leanstore.h"
 
 #include "share_headers/perf_ctrl.h"
@@ -25,7 +26,6 @@ auto main(int argc, char **argv) -> int {
   // Statistics
   PerfEvent e;
   PerfController ctrl;
-  std::atomic<bool> keep_running(true);
 
   // Initialize LeanStore
   auto db   = std::make_unique<leanstore::LeanStore>();
@@ -80,9 +80,12 @@ auto main(int argc, char **argv) -> int {
     db->CommitTransaction();
   });
 #endif
+  db->worker_pool.JoinAll();
   // extended TPC-C execution
   double scanDuration = 0;
-  db->StartProfilingThread();
+  // db->StartProfilingThread();
+  ctrl.StartPerfRuntime();
+  leanstore::start_profiling = true;
   for (auto turn = 0U; turn < 10; turn++) {
     // TPC-C
     db->worker_pool.ScheduleSyncJob(0, [&]() {
@@ -95,6 +98,7 @@ auto main(int argc, char **argv) -> int {
         db->CommitTransaction();
       }
     });
+    db->worker_pool.JoinAll();
 #ifdef DEBUG
     spdlog::debug("tpcc operations done. moving hot to cold data");
 #endif
@@ -110,7 +114,6 @@ auto main(int argc, char **argv) -> int {
     spdlog::debug("moving hot to cold data done. ");
 #endif
     // scan (measure time!)
-    ctrl.StartPerfRuntime();
     e.startCounters();
     db->worker_pool.ScheduleSyncJob(0, [&]() {
       db->StartTransaction();
@@ -119,8 +122,8 @@ auto main(int argc, char **argv) -> int {
     });
     e.stopCounters();
     scanDuration += e.getDuration();
-    ctrl.StopPerfRuntime();
   }
+  ctrl.StopPerfRuntime();
   db->Shutdown();
   spdlog::info("Space used: {:.4f} GB - WAL size: {:.4f} GB", db->AllocatedSize(), db->WALSize() - initial_wal_size);
   spdlog::info("scan: {:.4f} tuples/s", leanstore::statistics::total_scanned_tuples.load() / scanDuration);

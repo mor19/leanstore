@@ -75,7 +75,7 @@ auto main(int argc, char **argv) -> int {
   for (auto t_id = 0U; t_id < FLAGS_worker_count; t_id++) {
     db->worker_pool.ScheduleAsyncJob(t_id, [&, thread_id = t_id]() {
       fts->InitializeThread();
-      for (auto i = 0U; i < FLAGS_fts_run_queries_count_multiplier * 100; i++) {
+      for (auto i = 0U; i < FLAGS_fts_run_queries_count_multiplier * 20000; i++) {
         // select random order
         int w_id =
           (FLAGS_fts_warehouse_affinity) ? GetRandomWarehouseId(thread_id) : UniformRand(1, FLAGS_fts_warehouse_count);

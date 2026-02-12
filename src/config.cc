@@ -15,8 +15,8 @@ DEFINE_bool(worker_pin_thread, false, "Pin worker to a specific thread");
 DEFINE_uint32(txn_rate, 0, "Limit transaction rate in second for latency checking -- Disabled by default");
 // -----------------------------------------------------------------------------------
 /* Buffer manager */
-DEFINE_uint64(bm_virtual_gb, 8, "Size of virtual memory in GB");                                         // default 4
-DEFINE_uint64(bm_physical_gb, 2, "Size of physical memory in GB");                                       // default 1
+DEFINE_uint64(bm_virtual_gb, 64, "Size of virtual memory in GB");                                         // default 4
+DEFINE_uint64(bm_physical_gb, 8, "Size of physical memory in GB");                                       // default 1
 DEFINE_uint64(bm_alias_block_mb, 2048, "Size of worker-local aliasing area in MB");                      // default 1024
 DEFINE_uint64(bm_evict_batch_size, 128, "Expected number of pages to be evicted during each eviction");  // default 64
 DEFINE_bool(bm_enable_fair_eviction, true,
@@ -73,7 +73,7 @@ DEFINE_bool(blob_normal_buffer_pool, true,
             "2. *IMPORTANT* Extra hashtable lookup on Buffer's ToPtr & Read op"
             "3. *IMPORTANT* Require chunked processing on large object operations"
             "4. GroupCommit::PrepareLargePageWrite: Write on 4KB granularity instead of extent granularity");
-DEFINE_uint64(blob_buffer_pool_gb, 1,
+DEFINE_uint64(blob_buffer_pool_gb, 2,
               "Fixed size of the virtual memory range of BLOB in GBs"
               "0. Same value with FLAGS_bm_virtual_gb"
               "> 0. Fixed value");

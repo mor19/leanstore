@@ -209,7 +209,9 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
           // new chunk needs to be loaded
           if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
           chunk = FindChunkInColdData(tmpRowIdU64);
-          if (chunk == nullptr) { throw std::runtime_error("key in index, but in hot or cold data (chunk not found)"); }
+          if (chunk == nullptr) {
+            throw std::runtime_error("key in index, but not in hot or cold data (chunk not found)");
+          }
         }
         // get record from chunk
         // find idx in row id column
@@ -235,7 +237,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         });
         if (idx == -1) {
           this->blob_->UnloadAllBlobs();
-          throw std::runtime_error("key in index, but in hot or cold data (index in chunk not found)");
+          throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
         }
         // load requested payload columns and fill others with 0
         std::vector<u8> result;
@@ -404,7 +406,10 @@ auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLa
       }
     }
   });
-  if (idx == -1) { return false; }
+  if (idx == -1) {
+    this->blob_->UnloadAllBlobs();
+    return false;
+  }
   // load all payload columns
   std::vector<u8> result;
   // copy tuple value for each column
@@ -418,6 +423,7 @@ auto ColumnRowStore::LookUpBlob(std::span<const u8> blob_key, const ComparisonLa
                             }
                           });
   }
+  this->blob_->UnloadAllBlobs();
   // read
   read_cb(result);
   return idx != -1;  // should always be true
@@ -477,6 +483,10 @@ auto ColumnRowStore::FindChunkInColdData(u64 row_id) -> ColumnChunk * {
   }
   // go 1 entry back for getting the <=
   iterator--;
+  if (std::memcmp(&row_id, &iterator->maxRowId, sizeof(u64)) > 0) {
+    // not in this chunk
+    return nullptr;
+  }
   return &(*iterator);
 }
 

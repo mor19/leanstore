@@ -110,6 +110,7 @@ auto main(int argc, char **argv) -> int {
       for (auto &[type, ptr] : db->indexes) { ptr->ConvertHotDataToColdData(); }
       db->CommitTransaction();
     });
+    db->worker_pool.JoinAll();
 #ifdef DEBUG
     spdlog::debug("moving hot to cold data done. ");
 #endif
@@ -122,6 +123,7 @@ auto main(int argc, char **argv) -> int {
     });
     e.stopCounters();
     scanDuration += e.getDuration();
+    db->worker_pool.JoinAll();
   }
   ctrl.StopPerfRuntime();
   db->Shutdown();

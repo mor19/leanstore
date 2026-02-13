@@ -43,6 +43,8 @@ class Adapter {
   // -------------------------------------------------------------------------------------
   virtual void ScanOptimized(const typename RecordBase::Key &key, const std::unordered_set<uint32_t> &column_idxs,
                              const Adapter<RecordBase>::FoundRecordFunc &found_record_cb, const bool ascending) = 0;
+  virtual void ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs,
+                                    const Adapter<RecordBase>::FoundRecordFunc &found_record_cb)                = 0;
   // -------------------------------------------------------------------------------------
   virtual void Insert(const typename RecordBase::Key &key, const RecordBase &record) = 0;
   // -------------------------------------------------------------------------------------

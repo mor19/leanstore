@@ -15,7 +15,7 @@ DEFINE_bool(worker_pin_thread, false, "Pin worker to a specific thread");
 DEFINE_uint32(txn_rate, 0, "Limit transaction rate in second for latency checking -- Disabled by default");
 // -----------------------------------------------------------------------------------
 /* Buffer manager */
-DEFINE_uint64(bm_virtual_gb, 64, "Size of virtual memory in GB");                                         // default 4
+DEFINE_uint64(bm_virtual_gb, 40, "Size of virtual memory in GB");                                         // default 4
 DEFINE_uint64(bm_physical_gb, 8, "Size of physical memory in GB");                                       // default 1
 DEFINE_uint64(bm_alias_block_mb, 2048, "Size of worker-local aliasing area in MB");                      // default 1024
 DEFINE_uint64(bm_evict_batch_size, 128, "Expected number of pages to be evicted during each eviction");  // default 64

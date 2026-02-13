@@ -74,7 +74,8 @@ auto main(int argc, char **argv) -> int {
   db->worker_pool.JoinAll();
   ctrl.StopPerfRuntime();
   db->Shutdown();
-  spdlog::info("executed full query {} times on {} worker threads", FLAGS_fts_run_queries_count_multiplier, FLAGS_worker_count);
+  spdlog::info("executed full query {} times on {} worker threads", FLAGS_fts_run_queries_count_multiplier,
+               FLAGS_worker_count);
   e.stopCounters();
   e.printReport(std::cout, leanstore::statistics::total_committed_txn);
   spdlog::info("scan: {:.4f} tuples/s", leanstore::statistics::total_scanned_tuples.load() / e.getDuration());

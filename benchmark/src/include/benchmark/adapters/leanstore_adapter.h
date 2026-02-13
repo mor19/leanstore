@@ -38,6 +38,8 @@ struct LeanStoreAdapter : Adapter<RecordBase> {
   void ScanOptimized(const typename RecordBase::Key &key, const std::unordered_set<uint32_t> &column_idxs,
                      const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
                      const bool ascending) override;
+  void ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs,
+                            const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) override;
   void Insert(const typename RecordBase::Key &r_key, const RecordBase &record) override;
   void InsertRawPayload(const typename RecordBase::Key &r_key, std::span<const u8> record);
   void Update(const typename RecordBase::Key &r_key, const RecordBase &record) override;

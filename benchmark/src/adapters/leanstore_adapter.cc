@@ -18,7 +18,9 @@
 template <class RecordBase>
 LeanStoreAdapter<RecordBase>::LeanStoreAdapter(leanstore::LeanStore &db, std::vector<u32> columnSizes)
     : relation_(static_cast<std::type_index>(typeid(RecordBase))), db_(&db) {
-  db_->RegisterTable(relation_, RecordBase::TYPE_ID*2, columnSizes);  // TYPE_ID is a part of the LeanStore stupid catalog (*2 since 2 trees are required for the ColumnRowStore)
+  db_->RegisterTable(relation_, RecordBase::TYPE_ID * 2,
+                     columnSizes);  // TYPE_ID is a part of the LeanStore stupid catalog (*2 since 2 trees are required
+                                    // for the ColumnRowStore)
   tree_ = db_->RetrieveIndex(relation_);
 }
 
@@ -84,6 +86,25 @@ void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key 
   };
 
   tree_->ScanOptimized({key, len}, column_idxs, read_cb, ascending);
+}
+
+template <class RecordBase>
+void LeanStoreAdapter<RecordBase>::ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs,
+                                                   const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) {
+  // uninitialized default key
+  u8 key[RecordBase::MaxFoldLength()];
+  key[0] = 0;
+  typename RecordBase::Key typed_key;
+  RecordBase::UnfoldKey(key, typed_key);
+  auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
+    (void)key;
+    return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
+    // TODO(moritz): key
+    // typename RecordBase::Key typed_key;
+    // RecordBase::UnfoldKey(key.data(), typed_key);
+    // return found_record_cb(typed_key, *reinterpret_cast<const RecordBase *>(payload.data()));
+  };
+  tree_->ScanFullNoOrder(column_idxs, read_cb);
 }
 
 template <class RecordBase>

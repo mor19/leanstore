@@ -25,9 +25,15 @@ ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobMan
       columnSizes(columnSizes),
       hot_data(buffer_pool, recovery, this, this->columnSizes, tree_slot_hot_data),
       cold_data(),
-      allColumnIndices() {
+      allColumnIndices(),
+      columnSizesBeforeSum() {
+  payloadSize = 0;
   // generate vector with all column indices
-  for (u32 i = 0; i < this->columnSizes.size(); i++) { allColumnIndices.insert(i); }
+  for (u32 i = 0; i < this->columnSizes.size(); i++) {
+    allColumnIndices.insert(i);
+    columnSizesBeforeSum.push_back(payloadSize);
+    payloadSize += this->columnSizes[i];
+  }
 }
 
 /* config*/
@@ -171,9 +177,44 @@ void ColumnRowStore::ScanDescending(std::span<u8> key, const AccessRecordFunc &f
 void ColumnRowStore::ConvertHotDataToColdData() {
   hot_data.MoveHotDataToColdData();
 #ifdef DEBUG
-  spdlog::debug("{}/{} cold/total tuples (deactivate this message for benchmarking!!!)", CountColdEntries(),
-                CountEntries());
+  spdlog::debug("{}+{}/{} cold+hot/total tuples (deactivate this message for benchmarking!!!)", CountColdEntries(),
+                CountHotEntries(), CountEntries());
 #endif
+}
+
+/**
+ * scan the stored data in ascending or descending key order
+ * @param key starting keyto start from lowest row id
+ * @param column_idxs list of column indices that should be loaded
+ * @param fn record access function
+ */
+void ColumnRowStore::ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs, const AccessRecordFunc &fn) {
+  u64 tuples_scanned = 0;
+  u8 tmpPayload[payloadSize];
+  // for each chunk
+  for (ColumnChunk &chunk : cold_data) {
+    // load all selected columns
+    for (u32 col_idx : column_idxs) {
+      this->blob_->LoadBlob(chunk.column_parts[col_idx], 0, [](std::span<const uint8_t> data) { (void)data; });
+    }
+    // for each record in this chunk
+    for (u32 record_idx = 0; record_idx < chunk.count; record_idx++) {
+      // load requested payload columns and fill others with 0
+      memset(tmpPayload, 0, payloadSize);
+      // copy tuple value for each column
+      for (u32 column_idx : column_idxs) {
+        u32 columnSize = this->columnSizes[column_idx];
+        // copy into result vector
+        std::memcpy(tmpPayload + columnSizesBeforeSum[column_idx],
+                    chunk.column_parts[column_idx]->Data() + (record_idx * columnSize), columnSize);
+      }
+      // read
+      tuples_scanned++;
+      fn(std::span<u8>(), {tmpPayload, payloadSize});  // TODO key
+    }
+  }
+
+  if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
 }
 
 /**
@@ -192,152 +233,134 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
   if (ascending) {
     // scan by ascending order
     row_id_index.ScanAscending(key, [&](std::span<u8> tmp_key, std::span<u8> tmp_row_id) {
-      // hot data
-      if (!hot_data.LookUp(tmp_row_id, [&](std::span<u8> tmp_payload) {
-            // call fn
-            tuples_scanned++;
-            found = fn(tmp_key, tmp_payload);
-          })) {
-        // not in hot data -> must be in cold data
-        // get chunk
-        u64 tmpRowIdU64;
-        std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
-        if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
-            std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
-          // row id in the already loaded blob
-        } else {
-          // new chunk needs to be loaded
-          if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
-          chunk = FindChunkInColdData(tmpRowIdU64);
-          if (chunk == nullptr) {
-            throw std::runtime_error("key in index, but not in hot or cold data (chunk not found)");
-          }
+      // get chunk
+      u64 tmpRowIdU64;
+      std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
+      if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
+          std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
+        // row id in the already loaded blob
+      } else {
+        // new chunk needs to be loaded
+        if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+        chunk = FindChunkInColdData(tmpRowIdU64);
+        if (chunk == nullptr) {
+          throw std::runtime_error("key in index, but not in hot or cold data (chunk not found)");
         }
-        // get record from chunk
-        // find idx in row id column
-        int idx = -1;
-        this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
-          // find idx with binary search
-          u32 lower = 0;             // inclusive
-          u32 upper = chunk->count;  // exclusive
-          // binary search on remaining range
-          const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
-          while (lower < upper) {
-            auto mid = lower + ((upper - lower) / 2);
-            auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
-            if (cmp < 0) {
-              lower = mid + 1;
-            } else if (cmp > 0) {
-              upper = mid;
-            } else {
-              idx = mid;
-              break;
-            }
-          }
-        });
-        if (idx == -1) {
-          this->blob_->UnloadAllBlobs();
-          throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
-        }
-        // load requested payload columns and fill others with 0
-        std::vector<u8> result;
-        // copy tuple value for each column
-        for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
-          u32 columnSize = this->columnSizes[column_idx];
-          if (column_idxs.contains(column_idx)) {
-            // load column
-            this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
-                                  [&idx, &result, &columnSize](std::span<const uint8_t> data) {
-                                    // copy into result vector
-                                    for (u32 i = 0; i < columnSize; i++) {
-                                      result.push_back(*(data.data() + (idx * columnSize + i)));
-                                    }
-                                  });
-          } else {
-            // fill with 0s
-            result.resize(result.size() + columnSize, 0);
-          }
-        }
-        this->blob_->UnloadAllBlobs();
-        // read
-        tuples_scanned++;
-        found = fn(tmp_key, result);
       }
+      // get record from chunk
+      // find idx in row id column
+      int idx = -1;
+      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
+        // find idx with binary search
+        u32 lower = 0;             // inclusive
+        u32 upper = chunk->count;  // exclusive
+        // binary search on remaining range
+        const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
+        while (lower < upper) {
+          auto mid = lower + ((upper - lower) / 2);
+          auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
+          if (cmp < 0) {
+            lower = mid + 1;
+          } else if (cmp > 0) {
+            upper = mid;
+          } else {
+            idx = mid;
+            break;
+          }
+        }
+      });
+      if (idx == -1) {
+        this->blob_->UnloadAllBlobs();
+        throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
+      }
+      // load requested payload columns and fill others with 0
+      std::vector<u8> result;
+      // copy tuple value for each column
+      for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
+        u32 columnSize = this->columnSizes[column_idx];
+        if (column_idxs.contains(column_idx)) {
+          // load column
+          this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
+                                [&idx, &result, &columnSize](std::span<const uint8_t> data) {
+                                  // copy into result vector
+                                  for (u32 i = 0; i < columnSize; i++) {
+                                    result.push_back(*(data.data() + (idx * columnSize + i)));
+                                  }
+                                });
+        } else {
+          // fill with 0s
+          result.resize(result.size() + columnSize, 0);
+        }
+      }
+      // read
+      tuples_scanned++;
+      found = fn(tmp_key, result);
 
       return found;
     });
   } else {
     // scan by descending order
     row_id_index.ScanDescending(key, [&](std::span<u8> tmp_key, std::span<u8> tmp_row_id) {
-      // hot data
-      if (!hot_data.LookUp(tmp_row_id, [&](std::span<u8> tmp_payload) {
-            // call fn
-            tuples_scanned++;
-            found = fn(tmp_key, tmp_payload);
-          })) {
-        // not in hot data -> must be in cold data
-        // get chunk
-        u64 tmpRowIdU64;
-        std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
-        if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
-            std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
-          // row id in the already loaded blob
-        } else {
-          // new chunk needs to be loaded
-          if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
-          chunk = FindChunkInColdData(tmpRowIdU64);
-          if (chunk == nullptr) { throw std::runtime_error("key in index, but in hot or cold data (chunk not found)"); }
-        }
-        // get record from chunk
-        // find idx in row id column
-        int idx = -1;
-        this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
-          // find idx with binary search
-          u32 lower = 0;             // inclusive
-          u32 upper = chunk->count;  // exclusive
-          // binary search on remaining range
-          const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
-          while (lower < upper) {
-            auto mid = lower + ((upper - lower) / 2);
-            auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
-            if (cmp < 0) {
-              lower = mid + 1;
-            } else if (cmp > 0) {
-              upper = mid;
-            } else {
-              idx = mid;
-              break;
-            }
-          }
-        });
-        if (idx == -1) {
-          this->blob_->UnloadAllBlobs();
-          throw std::runtime_error("key in index, but in hot or cold data (index in chunk not found)");
-        }
-        // load requested payload columns and fill others with 0
-        std::vector<u8> result;
-        // copy tuple value for each column
-        for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
-          u32 columnSize = this->columnSizes[column_idx];
-          if (column_idxs.contains(column_idx)) {
-            // load column
-            this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
-                                  [&idx, &result, &columnSize](std::span<const uint8_t> data) {
-                                    // copy into result vector
-                                    for (u32 i = 0; i < columnSize; i++) {
-                                      result.push_back(*(data.data() + (idx * columnSize + i)));
-                                    }
-                                  });
-          } else {
-            // fill with 0s
-            result.resize(result.size() + columnSize, 0);
-          }
-        }
-        this->blob_->UnloadAllBlobs();
-        // read
-        tuples_scanned++;
-        found = fn(tmp_key, result);
+      // get chunk
+      u64 tmpRowIdU64;
+      std::memcpy(&tmpRowIdU64, tmp_row_id.data(), sizeof(u64));
+      if (chunk != nullptr && std::memcmp(&chunk->minRowId, tmp_row_id.data(), sizeof(u64)) <= 0 &&
+          std::memcmp(&chunk->maxRowId, tmp_row_id.data(), sizeof(u64)) >= 0) {
+        // row id in the already loaded blob
+      } else {
+        // new chunk needs to be loaded
+        if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+        chunk = FindChunkInColdData(tmpRowIdU64);
+        if (chunk == nullptr) { throw std::runtime_error("key in index, but in hot or cold data (chunk not found)"); }
       }
+      // get record from chunk
+      // find idx in row id column
+      int idx = -1;
+      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
+        // find idx with binary search
+        u32 lower = 0;             // inclusive
+        u32 upper = chunk->count;  // exclusive
+        // binary search on remaining range
+        const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
+        while (lower < upper) {
+          auto mid = lower + ((upper - lower) / 2);
+          auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
+          if (cmp < 0) {
+            lower = mid + 1;
+          } else if (cmp > 0) {
+            upper = mid;
+          } else {
+            idx = mid;
+            break;
+          }
+        }
+      });
+      if (idx == -1) {
+        this->blob_->UnloadAllBlobs();
+        throw std::runtime_error("key in index, but in hot or cold data (index in chunk not found)");
+      }
+      // load requested payload columns and fill others with 0
+      std::vector<u8> result;
+      // copy tuple value for each column
+      for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
+        u32 columnSize = this->columnSizes[column_idx];
+        if (column_idxs.contains(column_idx)) {
+          // load column
+          this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
+                                [&idx, &result, &columnSize](std::span<const uint8_t> data) {
+                                  // copy into result vector
+                                  for (u32 i = 0; i < columnSize; i++) {
+                                    result.push_back(*(data.data() + (idx * columnSize + i)));
+                                  }
+                                });
+        } else {
+          // fill with 0s
+          result.resize(result.size() + columnSize, 0);
+        }
+      }
+      // read
+      tuples_scanned++;
+      found = fn(tmp_key, result);
 
       return found;
     });
@@ -368,6 +391,11 @@ auto ColumnRowStore::CountColdEntries() -> u64 {
   for (ColumnChunk &chunk : this->cold_data) { result += chunk.count_active; }
   return result;
 }
+
+/**
+ * count hot data entries
+ */
+auto ColumnRowStore::CountHotEntries() -> u64 { return hot_data.CountEntries(); }
 
 auto ColumnRowStore::SizeInMB() -> float { return CountPages() * static_cast<float>(PAGE_SIZE) / MB; }
 
@@ -462,7 +490,7 @@ auto ColumnRowStore::CountPages() -> u64 {
  */
 auto ColumnRowStore::InternalRemove(u64 row_id) -> bool {
   // hot data
-  if (hot_data.Remove(U64ToSpanU8(row_id))) { return true; }
+  hot_data.Remove(U64ToSpanU8(row_id));
   // cold data
   ColumnChunk *chunk = this->FindChunkInColdData(row_id);
   if (chunk != nullptr) {

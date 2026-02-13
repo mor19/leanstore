@@ -50,15 +50,12 @@ Numeric FTSWorkload<AdapterType>::GetRevenueInDistrict(Integer w_id, Integer d_i
 template <template <typename> class AdapterType>
 Numeric FTSWorkload<AdapterType>::GetTotalRevenue() {
   Numeric totalRevenue = 0.0;
-  this->orderline.ScanOptimized(
-    {0, 0, 0, 0}, {4},
-    [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
-      (void)ol_key;
-      // sum up all amounts (ol_quantity * i_price) of all order lines to get the total revenue
-      totalRevenue = totalRevenue + ol_rec.ol_amount;
-      return true;
-    },
-    true);
+  this->orderline.ScanFullNoOrder({4}, [&](const OrderLineType::Key &ol_key, const OrderLineType &ol_rec) {
+    (void)ol_key;
+    // sum up all amounts (ol_quantity * i_price) of all order lines to get the total revenue
+    totalRevenue = totalRevenue + ol_rec.ol_amount;
+    return true;
+  });
   return totalRevenue;
 }
 

@@ -45,12 +45,14 @@ class ColumnRowStore : public HKVInterface {
   void ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) override;
   void ScanOptimized(std::span<u8> key, const std::unordered_set<u32> &column_idxs, const AccessRecordFunc &fn,
                      const bool ascending) override;
+  void ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs, const AccessRecordFunc &fn) override;
   auto CountEntries() -> u64 override;
   auto SizeInMB() -> float override;
   auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
     -> bool override;
   void ConvertHotDataToColdData() override;
   auto CountColdEntries() -> u64;
+  auto CountHotEntries() -> u64;
 
   // -------------------------------------------------------------------------------------
   /* APIs for use within LeanStore */
@@ -71,6 +73,8 @@ class ColumnRowStore : public HKVInterface {
   storage::ExtendedBTree hot_data;
   std::vector<ColumnChunk> cold_data;
   std::unordered_set<u32> allColumnIndices;  // contains all column indices
+  u32 payloadSize;
+   std::vector<u32> columnSizesBeforeSum;
 };
 
 }  // namespace leanstore::storage

@@ -584,159 +584,190 @@ auto ExtendedBTree::LookUpBlob(std::span<const u8> blob_key, const ComparisonLam
   }
 }
 
-void ExtendedBTree::RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
-                                    sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&node) {
-  assert(parent->IsInner());
-  assert(node->IsInner());
-
-  // root node children can not be removed
-  if (parent.PageID() == METADATA_PAGE_ID) { return; }
-
-  if (parent->header.right_most_child == node.PageID()) {
-    // remove rightmost child by overwriting with second last child ptr
-    if (parent->header.count <= 1) { throw sync::SkippingRestartException{}; }
-    parent->header.right_most_child = parent->GetChild(parent->header.count - 1);
-    parent->RemoveSlot(parent->header.count - 1);
-  } else {
-    // find pos and remove slot
-    for (leng_t pos = 0; pos < parent->header.count; pos++) {
-      if (parent->GetChild(pos) == node.PageID()) {
-        parent->RemoveSlot(pos);
-        break;
-      }
-    }
-  }
-
-  // store cold data
+void ExtendedBTree::MoveHotDataToColdData() {
+  // make sure at least root and its children are inner nodes
+  OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
+  OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_), meta);
+  if (!root->IsInner() || root->header.count == 0) { return; }
+  time_t current_time;
+  std::time(&current_time);
+  // start iterating from root
+  // IterateLeafParents(root.PageID(), current_time); // too slow
+  u8 tmpRowIdBuffer[sizeof(u64)];
   std::vector<u8> tmp_row_ids;
   std::vector<std::vector<u8>> tmp_data;
   tmp_data.resize(column_sizes_.size());
-  // read all children
-  for (auto idx = 0; idx < node->header.count; idx++) {
-    ExclusiveGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
-    for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
-      // row id (also copy prefix!)
-      u8 tmpRowIdBuffer[sizeof(u64)];
-      std::memcpy(tmpRowIdBuffer, child.Ptr()->GetPrefix(), child.Ptr()->header.prefix_len);
-      std::memcpy(tmpRowIdBuffer + child.Ptr()->header.prefix_len, child.Ptr()->GetKey(entry_idx),
-                  child.Ptr()->slots[entry_idx].key_length);
-      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
-      // payload
-      u8 *payloadData     = child.Ptr()->GetPayload(entry_idx).data();
-      size_t recordOffset = 0;
-      // split payload into column values
-      for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
-        const u32 size = column_sizes_[col_idx];
-        tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
-                                 payloadData + recordOffset + size);
-        recordOffset += size;
+  IterateAllNodes(
+    root, [](BTreeNodeWithTimeStamp &) { return 0; },
+    [&](BTreeNodeWithTimeStamp &leaf) {
+      for (auto entry_idx = 0; entry_idx < leaf.header.count; entry_idx++) {
+        // row id (also copy prefix!)
+        std::memcpy(tmpRowIdBuffer, leaf.GetPrefix(), leaf.header.prefix_len);
+        std::memcpy(tmpRowIdBuffer + leaf.header.prefix_len, leaf.GetKey(entry_idx), leaf.slots[entry_idx].key_length);
+        tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
+        // payload
+        u8 *payloadData     = leaf.GetPayload(entry_idx).data();
+        size_t recordOffset = 0;
+        // split payload into column values
+        for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+          const u32 size = column_sizes_[col_idx];
+          tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+                                   payloadData + recordOffset + size);
+          recordOffset += size;
+        }
       }
-    }
-  }
-  {
-    ExclusiveGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
-    for (auto entry_idx = 0; entry_idx < rightmost_child.Ptr()->header.count; entry_idx++) {
-      // row id (also copy prefix!)
-      u8 tmpRowIdBuffer[sizeof(u64)];
-      std::memcpy(tmpRowIdBuffer, rightmost_child.Ptr()->GetPrefix(), rightmost_child.Ptr()->header.prefix_len);
-      std::memcpy(tmpRowIdBuffer + rightmost_child.Ptr()->header.prefix_len, rightmost_child.Ptr()->GetKey(entry_idx),
-                  rightmost_child.Ptr()->slots[entry_idx].key_length);
-      tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
-      // payload
-      u8 *payloadData     = rightmost_child.Ptr()->GetPayload(entry_idx).data();
-      size_t recordOffset = 0;
-      // split payload into column values
-      for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
-        const u32 size = column_sizes_[col_idx];
-        tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
-                                 payloadData + recordOffset + size);
-        recordOffset += size;
+      // TODO(moritz): tuple limit
+      if ((tmp_row_ids.size() >> 3) >= 10000) {
+        column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
+        tmp_row_ids.clear();
+        tmp_data.clear();
+        tmp_data.resize(column_sizes_.size());
       }
-    }
-  }
-
-  // store cold data
-  column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
-  // spdlog::info("stored {} cold tuples", tmp_row_ids.size() / 8);
-
-  node.Unlock();
-  // check if parent is underfull -> merge upwards
-  if (parent->FreeSpaceAfterCompaction() >= BTreeNodeHeaderWithTimestamp::SIZE_UNDER_FULL) {
-    EnsureUnderfullInnersForMerge(parent.UnlockAndGetPtr());
-  }
+      return 1;
+    });
+  if (tmp_row_ids.size() > 0) { column_row_store_->StoreColdData(tmp_row_ids, tmp_data); }
 }
 
-void ExtendedBTree::MoveHotDataToColdData() {
-  while (true) {
-    try {
-      // make sure at least root and its children are inner nodes
-      OptimisticGuard<MetadataPage> meta(buffer_, METADATA_PAGE_ID);
-      OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_), meta);
-      if (!root->IsInner() || root->header.count == 0) { return; }
-      time_t current_time;
-      std::time(&current_time);
-      leng_t count = root->header.count;
-      for (leng_t i = 0; i < count; i++) {
-        OptimisticGuard<BTreeNodeWithTimeStamp> root(buffer_, meta->GetRoot(metadata_slotid_));
-        OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, root->GetChild(i));
-        if (!child->IsInner()) { return; }
-        // start iterating from root
-        IterateLeafParents(child.PageID(), root.PageID(), current_time);
-      }
-      return;
-    } catch (const sync::RestartException &) {
-    } catch (const sync::SkippingRestartException) { return; }
-  }
-}
-
-void ExtendedBTree::IterateLeafParents(pageid_t nodeId, pageid_t parentId, time_t current_time) {
+void ExtendedBTree::IterateLeafParents(pageid_t nodeId, time_t current_time) {
   // not threadsafe!!!
-  ExclusiveGuard<BTreeNodeWithTimeStamp> parent_locked(buffer_, parentId);
-  ExclusiveGuard<BTreeNodeWithTimeStamp> node(buffer_, nodeId);
-  if (!node->IsInner()) return;
-  std::vector<pageid_t> toCheck;
-  for (leng_t i = 0; i < node->header.count; i++) {
-    ExclusiveGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
-    if (!child->IsInner()) {
-      // leaf parent -> check time in rightmost child node
-      ExclusiveGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
-      if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
-        // data is expired -> move to cold data
-        child.Unlock();
-        rightmost_child.Unlock();
-        RemoveInnerNode(std::move(parent_locked), std::move(node));
-        throw sync::RestartException{};
+  OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, nodeId);
+  if (!node->IsInner()) { return; }
+  OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+  if (!rightmost_child->IsInner()) {
+    // leaf parent -> check time in rightmost child node
+    if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
+      // data is expired -> move to cold data
+      // store cold data
+      std::vector<u8> tmp_row_ids;
+      std::vector<std::vector<u8>> tmp_data;
+      tmp_data.resize(column_sizes_.size());
+      // read all children
+      for (auto idx = 0; idx < node->header.count; idx++) {
+        OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
+        for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
+          // row id (also copy prefix!)
+          u8 tmpRowIdBuffer[sizeof(u64)];
+          std::memcpy(tmpRowIdBuffer, child.Ptr()->GetPrefix(), child.Ptr()->header.prefix_len);
+          std::memcpy(tmpRowIdBuffer + child.Ptr()->header.prefix_len, child.Ptr()->GetKey(entry_idx),
+                      child.Ptr()->slots[entry_idx].key_length);
+          tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
+          // payload
+          u8 *payloadData     = child.Ptr()->GetPayload(entry_idx).data();
+          size_t recordOffset = 0;
+          // split payload into column values
+          for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+            const u32 size = column_sizes_[col_idx];
+            tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+                                     payloadData + recordOffset + size);
+            recordOffset += size;
+          }
+        }
       }
-      return;
-    } else {
-      toCheck.push_back(child.PageID());
-      child.Unlock();
-    }
-  }
 
-  // rightmost child
-  {
-    ExclusiveGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
-    if (!rightmost_child->IsInner()) {
-      // leaf parent -> check time
-      if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
-        // data is expired -> move to cold data
-        rightmost_child.Unlock();
-
-        RemoveInnerNode(std::move(parent_locked), std::move(node));
-        throw sync::RestartException{};
+      for (auto entry_idx = 0; entry_idx < rightmost_child.Ptr()->header.count; entry_idx++) {
+        // row id (also copy prefix!)
+        u8 tmpRowIdBuffer[sizeof(u64)];
+        std::memcpy(tmpRowIdBuffer, rightmost_child.Ptr()->GetPrefix(), rightmost_child.Ptr()->header.prefix_len);
+        std::memcpy(tmpRowIdBuffer + rightmost_child.Ptr()->header.prefix_len, rightmost_child.Ptr()->GetKey(entry_idx),
+                    rightmost_child.Ptr()->slots[entry_idx].key_length);
+        tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
+        // payload
+        u8 *payloadData     = rightmost_child.Ptr()->GetPayload(entry_idx).data();
+        size_t recordOffset = 0;
+        // split payload into column values
+        for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+          const u32 size = column_sizes_[col_idx];
+          tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+                                   payloadData + recordOffset + size);
+          recordOffset += size;
+        }
       }
-      return;
-    } else {
-      toCheck.push_back(rightmost_child.PageID());
-      rightmost_child.Unlock();  // redundant
-    }
-  }
 
-  // iterate children
-  parent_locked.Unlock();
-  node.Unlock();
-  for (pageid_t pageId : toCheck) { IterateLeafParents(pageId, nodeId, current_time); }
+      // store cold data
+      column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
+    }
+    return;
+  } else {
+    // iterate children
+    for (leng_t i = 0; i < node->header.count; i++) {
+      OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
+      IterateLeafParents(child.PageID(), current_time);
+    }
+    IterateLeafParents(rightmost_child.PageID(), current_time);
+  }
 }
+
+// too small granularity
+// void ExtendedBTree::IterateLeafParents(pageid_t nodeId, time_t current_time) {
+//   // not threadsafe!!!
+//   OptimisticGuard<BTreeNodeWithTimeStamp> node(buffer_, nodeId);
+//   if (!node->IsInner()) { return; }
+//   OptimisticGuard<BTreeNodeWithTimeStamp> rightmost_child(buffer_, node->header.right_most_child);
+//   std::vector<pageid_t> toCheck;
+//   for (leng_t i = 0; i < node->header.count; i++) {
+//     OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(i));
+//     if (!child->IsInner()) {
+//       // leaf parent -> check time in rightmost child node
+//       if (current_time - rightmost_child->header.timestamp >= FLAGS_htap_expire_seconds) {
+//         // data is expired -> move to cold data
+//         // store cold data
+//         std::vector<u8> tmp_row_ids;
+//         std::vector<std::vector<u8>> tmp_data;
+//         tmp_data.resize(column_sizes_.size());
+//         // read all children
+//         for (auto idx = 0; idx < node->header.count; idx++) {
+//           OptimisticGuard<BTreeNodeWithTimeStamp> child(buffer_, node->GetChild(idx));
+//           for (auto entry_idx = 0; entry_idx < child.Ptr()->header.count; entry_idx++) {
+//             // row id (also copy prefix!)
+//             u8 tmpRowIdBuffer[sizeof(u64)];
+//             std::memcpy(tmpRowIdBuffer, child.Ptr()->GetPrefix(), child.Ptr()->header.prefix_len);
+//             std::memcpy(tmpRowIdBuffer + child.Ptr()->header.prefix_len, child.Ptr()->GetKey(entry_idx),
+//                         child.Ptr()->slots[entry_idx].key_length);
+//             tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
+//             // payload
+//             u8 *payloadData     = child.Ptr()->GetPayload(entry_idx).data();
+//             size_t recordOffset = 0;
+//             // split payload into column values
+//             for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+//               const u32 size = column_sizes_[col_idx];
+//               tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+//                                        payloadData + recordOffset + size);
+//               recordOffset += size;
+//             }
+//           }
+//         }
+
+//         for (auto entry_idx = 0; entry_idx < rightmost_child.Ptr()->header.count; entry_idx++) {
+//           // row id (also copy prefix!)
+//           u8 tmpRowIdBuffer[sizeof(u64)];
+//           std::memcpy(tmpRowIdBuffer, rightmost_child.Ptr()->GetPrefix(), rightmost_child.Ptr()->header.prefix_len);
+//           std::memcpy(tmpRowIdBuffer + rightmost_child.Ptr()->header.prefix_len,
+//                       rightmost_child.Ptr()->GetKey(entry_idx), rightmost_child.Ptr()->slots[entry_idx].key_length);
+//           tmp_row_ids.insert(tmp_row_ids.end(), tmpRowIdBuffer, tmpRowIdBuffer + sizeof(u64));
+//           // payload
+//           u8 *payloadData     = rightmost_child.Ptr()->GetPayload(entry_idx).data();
+//           size_t recordOffset = 0;
+//           // split payload into column values
+//           for (size_t col_idx = 0; col_idx < column_sizes_.size(); col_idx++) {
+//             const u32 size = column_sizes_[col_idx];
+//             tmp_data[col_idx].insert(tmp_data[col_idx].end(), payloadData + recordOffset,
+//                                      payloadData + recordOffset + size);
+//             recordOffset += size;
+//           }
+//         }
+
+//         // store cold data
+//         column_row_store_->StoreColdData(tmp_row_ids, tmp_data);
+//       }
+//       return;
+//     } else {
+//       toCheck.push_back(child.PageID());
+//     }
+//   }
+//   toCheck.push_back(rightmost_child.PageID());
+
+//   // iterate children
+//   for (pageid_t pageId : toCheck) { IterateLeafParents(pageId, current_time); }
+// }
 
 }  // namespace leanstore::storage

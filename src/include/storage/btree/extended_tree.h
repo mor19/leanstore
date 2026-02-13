@@ -60,7 +60,7 @@ class ExtendedBTree : public KVInterface {
   auto IterateUntils(sync::OptimisticGuard<BTreeNodeWithTimeStamp> &node,
                      const std::function<bool(BTreeNodeWithTimeStamp &)> &inner_fn,
                      const std::function<bool(BTreeNodeWithTimeStamp &)> &leaf_fn) -> bool;
-  void IterateLeafParents(pageid_t nodeId, pageid_t parentId, time_t current_time);
+  void IterateLeafParents(pageid_t nodeId, time_t current_time);
 
   /* Find Leaf Node storing the key */
   auto FindLeafOptimistic(std::span<u8> key) -> sync::OptimisticGuard<BTreeNodeWithTimeStamp>;
@@ -103,10 +103,6 @@ class ExtendedBTree : public KVInterface {
 
   /* Comparison properties */
   ComparisonLambda cmp_lambda_{ComparisonOperator::MEMCMP, std::memcmp};
-
-  /* node remove function */
-  void RemoveInnerNode(sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&parent,
-                       sync::ExclusiveGuard<BTreeNodeWithTimeStamp> &&node);
 };
 
 }  // namespace leanstore::storage

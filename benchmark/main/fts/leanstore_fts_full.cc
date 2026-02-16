@@ -46,7 +46,6 @@ auto main(int argc, char **argv) -> int {
   spdlog::info("Space used: {:.4f} GB", db->AllocatedSize());
 
   // move hot to cold data
-  std::this_thread::sleep_for(std::chrono::seconds(FLAGS_htap_expire_seconds + 1));
   db->worker_pool.ScheduleSyncJob(0, [&]() {
     fts->InitializeThread();
     db->StartTransaction();

@@ -182,9 +182,10 @@ void ColumnRowStore::ConvertHotDataToColdData() {
 #endif
 }
 
+
+// TODO(moritz): multiple blob loads only inside callback?
 /**
- * scan the stored data in ascending or descending key order
- * @param key starting keyto start from lowest row id
+ * scan the stored data in no order
  * @param column_idxs list of column indices that should be loaded
  * @param fn record access function
  */
@@ -246,29 +247,32 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         if (chunk == nullptr) {
           throw std::runtime_error("key in index, but not in hot or cold data (chunk not found)");
         }
+        // load blobs
+        this->blob_->LoadBlob(chunk->idx_column, 0, [](std::span<const uint8_t> data) {(void) data;});
+        for (u32 column_idx : column_idxs) {
+          this->blob_->LoadBlob(chunk->column_parts[column_idx], 0, [](std::span<const uint8_t> data) {(void) data;});
+        }
       }
       // get record from chunk
       // find idx in row id column
       int idx = -1;
-      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
-        // find idx with binary search
-        u32 lower = 0;             // inclusive
-        u32 upper = chunk->count;  // exclusive
-        // binary search on remaining range
-        const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
-        while (lower < upper) {
-          auto mid = lower + ((upper - lower) / 2);
-          auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
-          if (cmp < 0) {
-            lower = mid + 1;
-          } else if (cmp > 0) {
-            upper = mid;
-          } else {
-            idx = mid;
-            break;
-          }
+      // find idx with binary search
+      u32 lower = 0;             // inclusive
+      u32 upper = chunk->count;  // exclusive
+      // binary search on remaining range
+      while (lower < upper) {
+        auto mid = lower + ((upper - lower) / 2);
+        auto cmp = std::memcmp(chunk->idx_column->Data() + (mid * sizeof(u64)), tmp_row_id.data(), sizeof(uint64_t));
+        if (cmp < 0) {
+          lower = mid + 1;
+        } else if (cmp > 0) {
+          upper = mid;
+        } else {
+          idx = mid;
+          break;
         }
-      });
+      }
+
       if (idx == -1) {
         this->blob_->UnloadAllBlobs();
         throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
@@ -280,13 +284,11 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         u32 columnSize = this->columnSizes[column_idx];
         if (column_idxs.contains(column_idx)) {
           // load column
-          this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
-                                [&idx, &result, &columnSize](std::span<const uint8_t> data) {
-                                  // copy into result vector
-                                  for (u32 i = 0; i < columnSize; i++) {
-                                    result.push_back(*(data.data() + (idx * columnSize + i)));
-                                  }
-                                });
+          // copy into result vector
+          for (u32 i = 0; i < columnSize; i++) {
+            result.push_back(*(chunk->column_parts[column_idx]->Data() + (idx * columnSize + i)));
+          }
+
         } else {
           // fill with 0s
           result.resize(result.size() + columnSize, 0);

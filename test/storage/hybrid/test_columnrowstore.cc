@@ -153,6 +153,9 @@ TEST_F(TestColumnRowStore, TreeScan) {
   Prepare<int>(data, false);
   std::unordered_map<int, int> scan_result;
 
+  // all scans are cold in this version! -> requires conversion to cold data
+  columnrowstore_->ConvertHotDataToColdData();
+
   auto read_cb = [&scan_result](std::span<u8> key, std::span<u8> payload) -> bool {
     scan_result[LoadUnaligned<int>(key.data())] = LoadUnaligned<int>(payload.data());
     return true;
@@ -203,6 +206,10 @@ TEST_F(TestColumnRowStore, InsertAndCheckOrder) {
     std::span payload{reinterpret_cast<u8 *>(&pair.second), sizeof(u64)};
     columnrowstore_->Insert(key, payload);
   }
+
+  // all scans are cold in this version! -> requires conversion to cold data
+  columnrowstore_->ConvertHotDataToColdData();
+
   // check order
   u64 last         = 0;
   auto check_order = [&last](std::span<u8> key, std::span<u8> payload) -> bool {
@@ -234,6 +241,7 @@ TEST_F(TestColumnRowStore, InsertAndMoveToColdAndQuery) {
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
+  ASSERT_TRUE(columnrowstore_->CountColdEntries() == columnrowstore_->CountHotEntries());
   spdlog::info("cold tuples: {}", columnrowstore_->CountColdEntries());
   spdlog::info("total tuples: {}", columnrowstore_->CountEntries());
 
@@ -259,6 +267,7 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   InitRandTransaction();
 
   ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
+  ASSERT_TRUE(columnrowstore_->CountColdEntries() == columnrowstore_->CountHotEntries());
   spdlog::info("cold tuples: {}", columnrowstore_->CountColdEntries());
   spdlog::info("total tuples: {}", columnrowstore_->CountEntries());
 
@@ -270,6 +279,8 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   };
 
   // ScanOptimized
+  int start_key = 0;
+  std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
   std::unordered_set<u32> columnIdxs = {0};
   columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
@@ -279,8 +290,8 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   }
 
   // Scan Asc
-  int start_key = 0;
-  std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
+  // int start_key = 0;
+  // std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
   columnrowstore_->ScanAscending(key, read_cb);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
@@ -298,6 +309,39 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
     EXPECT_TRUE(scan_result[pair.first] == pair.second);
   }
   EXPECT_EQ(scan_result.size(), data.size());
+}
+
+TEST_F(TestColumnRowStore, ColdScanFull) {
+  std::vector<std::pair<int, int>> data;
+  Prepare<int>(data, false, true, NO_RECORDS * 2);
+
+  columnrowstore_->ConvertHotDataToColdData();
+  txn_man_->CommitTransaction();
+  InitRandTransaction();
+
+  ASSERT_TRUE(columnrowstore_->CountColdEntries() > 0);
+  ASSERT_TRUE(columnrowstore_->CountColdEntries() == columnrowstore_->CountHotEntries());
+  spdlog::info("cold tuples: {}", columnrowstore_->CountColdEntries());
+  spdlog::info("total tuples: {}", columnrowstore_->CountEntries());
+
+  std::unordered_map<int, int> scan_result;
+  auto count   = 0;
+  auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
+    (void)key;
+    count++;
+    scan_result[LoadUnaligned<int>(payload.data())] = LoadUnaligned<int>(payload.data());
+    return true;
+  };
+
+  // ScanFullNoOrder
+  std::unordered_set<u32> columnIdxs = {0};
+  columnrowstore_->ScanFullNoOrder(columnIdxs, read_cb);
+  EXPECT_EQ(count, data.size());
+  EXPECT_EQ(scan_result.size(), data.size());
+  for (auto &pair : data) {
+    ASSERT_TRUE(scan_result.find(pair.first * 100) != scan_result.end());
+    ASSERT_TRUE(scan_result[pair.first * 100] == pair.second);
+  }
 }
 
 TEST_F(TestColumnRowStore, ColdRemoveAndQuery) {
@@ -363,7 +407,7 @@ TEST_F(TestColumnRowStore, ColdUpdateAndQuery) {
   for (size_t idx = 0; idx < MIDHIGH_NO_RECORDS1; idx++) { validation[idx + 1] = idx * 100; }
 
   // Remove random
-  for (auto idx = 0ULL; idx < MIDHIGH_NO_RECORDS1/4; idx++) {
+  for (auto idx = 0ULL; idx < MIDHIGH_NO_RECORDS1 / 4; idx++) {
     int int_key     = rand() % MIDHIGH_NO_RECORDS1 + 1;
     int ordered_key = __builtin_bswap32(int_key);
     std::span key{reinterpret_cast<u8 *>(&ordered_key), sizeof(int)};
@@ -384,7 +428,8 @@ TEST_F(TestColumnRowStore, ColdUpdateAndQuery) {
     ASSERT_TRUE(found);
   }
 
-  ASSERT_EQ(columnrowstore_->CountEntries(), MIDHIGH_NO_RECORDS1);
+  ASSERT_EQ(columnrowstore_->CountHotEntries(), MIDHIGH_NO_RECORDS1);
+  ASSERT_TRUE(columnrowstore_->CountColdEntries() < MIDHIGH_NO_RECORDS1);
 }
 
 }  // namespace leanstore::storage

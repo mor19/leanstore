@@ -380,6 +380,16 @@ void BlobManager::LoadBlob(const BlobState *blob, u64 required_load_size, const 
   cb({guard.GetPtr(), required_load_size});
 }
 
+void BlobManager::LoadGuardBlob(const BlobState *blob, u64 required_load_size, const BlobGuardCallbackFunc &cb) {
+  // Don't read more the the capacity of the Blob
+  if (required_load_size > blob->blob_size || required_load_size == 0) { required_load_size = blob->blob_size; }
+
+  LoadBlobContent(blob, required_load_size);
+  auto guard = AliasingGuard(buffer_, *blob, required_load_size);
+  u8 *ptr    = guard.GetPtr();
+  cb(std::move(guard), {ptr, required_load_size});
+}
+
 void BlobManager::UnloadAllBlobs() {
   // Unfix all Blobs
   for (const auto &extent_pid : extent_loaded) { buffer_->UnfixShare(extent_pid); }

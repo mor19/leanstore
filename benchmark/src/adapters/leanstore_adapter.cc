@@ -12,7 +12,7 @@
 #include "leanstore/schema.h"
 
 #include <span>
-#include <unordered_set>
+#include <set>
 #include <vector>
 
 template <class RecordBase>
@@ -73,7 +73,7 @@ void LeanStoreAdapter<RecordBase>::ScanDesc(const typename RecordBase::Key &key,
 
 template <class RecordBase>
 void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key &r_key,
-                                                 const std::unordered_set<uint32_t> &column_idxs,
+                                                 const std::set<uint32_t> &column_idxs,
                                                  const typename Adapter<RecordBase>::FoundRecordFunc &found_record_cb,
                                                  const bool ascending) {
   u8 key[RecordBase::MaxFoldLength()];
@@ -89,7 +89,7 @@ void LeanStoreAdapter<RecordBase>::ScanOptimized(const typename RecordBase::Key 
 }
 
 template <class RecordBase>
-void LeanStoreAdapter<RecordBase>::ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs,
+void LeanStoreAdapter<RecordBase>::ScanFullNoOrder(const std::set<uint32_t> &column_idxs,
                                                    const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) {
   // uninitialized default key
   u8 key[RecordBase::MaxFoldLength()];

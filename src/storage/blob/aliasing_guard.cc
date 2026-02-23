@@ -27,6 +27,27 @@ AliasingGuard::AliasingGuard(buffer::BufferManager *buffer, const BlobState &blo
 
 AliasingGuard::~AliasingGuard() { free(ptr_); }
 
+AliasingGuard::AliasingGuard(AliasingGuard &&other) noexcept {
+  ptr_    = other.ptr_;
+  buffer_ = other.buffer_;
+
+  other.ptr_    = nullptr;
+  other.buffer_ = nullptr;
+}
+
+AliasingGuard &AliasingGuard::operator=(AliasingGuard &&other) noexcept {
+  if (this != &other) {
+    free(ptr_);
+
+    ptr_    = other.ptr_;
+    buffer_ = other.buffer_;
+
+    other.ptr_    = nullptr;
+    other.buffer_ = nullptr;
+  }
+  return *this;
+}
+
 auto AliasingGuard::GetPtr() -> u8 * { return ptr_; }
 
 }  // namespace leanstore::storage::blob

@@ -7,7 +7,7 @@
 #include <functional>
 #include <span>
 #include <thread>
-#include <unordered_set>
+#include <set>
 #include <vector>
 
 static constexpr uint64_t GLOBAL_BLOCK_SIZE = 4096;
@@ -41,9 +41,9 @@ class Adapter {
   virtual void ScanDesc(const typename RecordBase::Key &key,
                         const Adapter<RecordBase>::FoundRecordFunc &found_record_cb) = 0;
   // -------------------------------------------------------------------------------------
-  virtual void ScanOptimized(const typename RecordBase::Key &key, const std::unordered_set<uint32_t> &column_idxs,
+  virtual void ScanOptimized(const typename RecordBase::Key &key, const std::set<uint32_t> &column_idxs,
                              const Adapter<RecordBase>::FoundRecordFunc &found_record_cb, const bool ascending) = 0;
-  virtual void ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs,
+  virtual void ScanFullNoOrder(const std::set<uint32_t> &column_idxs,
                                     const Adapter<RecordBase>::FoundRecordFunc &found_record_cb)                = 0;
   // -------------------------------------------------------------------------------------
   virtual void Insert(const typename RecordBase::Key &key, const RecordBase &record) = 0;

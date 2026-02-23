@@ -2,6 +2,7 @@
 
 #include "buffer/buffer_manager.h"
 #include "storage/blob/blob_state.h"
+#include "storage/blob/aliasing_guard.h"
 
 #include "gtest/gtest_prod.h"
 #include "roaring/roaring.hh"
@@ -15,6 +16,7 @@
 namespace leanstore::storage::blob {
 
 using BlobCallbackFunc = std::function<void(std::span<const u8>)>;
+using BlobGuardCallbackFunc = std::function<void(AliasingGuard&&, std::span<const u8>)>;
 
 class BlobManager {
  public:
@@ -31,6 +33,7 @@ class BlobManager {
 
   // Blob Load/Unload utilities
   void LoadBlob(const BlobState *blob, u64 required_load_size, const BlobCallbackFunc &cb);
+  void LoadGuardBlob(const BlobState *blob, u64 required_load_size, const BlobGuardCallbackFunc &cb);
   void UnloadAllBlobs();
 
   // Comparator utilities

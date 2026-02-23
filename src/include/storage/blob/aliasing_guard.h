@@ -17,6 +17,11 @@ struct AliasingGuard {
   ~AliasingGuard();
   auto GetPtr() -> u8 *;
 
+  AliasingGuard(const AliasingGuard &)            = delete;
+  AliasingGuard &operator=(const AliasingGuard &) = delete;
+  AliasingGuard(AliasingGuard &&other) noexcept;
+  AliasingGuard &operator=(AliasingGuard &&other) noexcept;
+
  private:
   u8 *ptr_{nullptr};
   buffer::BufferManager *buffer_;

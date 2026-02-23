@@ -8,9 +8,9 @@
 
 #include <chrono>
 #include <cstring>
+#include <set>
 #include <thread>
 #include <unordered_map>
-#include <unordered_set>
 
 namespace leanstore::storage {
 
@@ -162,7 +162,7 @@ TEST_F(TestColumnRowStore, TreeScan) {
   };
 
   // ScanOptimized
-  std::unordered_set<u32> columnIdxs = {0};
+  std::set<u32> columnIdxs = {0};
   columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
@@ -172,6 +172,7 @@ TEST_F(TestColumnRowStore, TreeScan) {
 
   // Scan Asc
   int start_key = 0;
+  scan_result.clear();
   std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
   columnrowstore_->ScanAscending(key, read_cb);
   EXPECT_EQ(scan_result.size(), data.size());
@@ -281,7 +282,7 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   // ScanOptimized
   int start_key = 0;
   std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
-  std::unordered_set<u32> columnIdxs = {0};
+  std::set<u32> columnIdxs = {0};
   columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
@@ -292,6 +293,7 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   // Scan Asc
   // int start_key = 0;
   // std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
+  scan_result.clear();
   columnrowstore_->ScanAscending(key, read_cb);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
@@ -329,18 +331,18 @@ TEST_F(TestColumnRowStore, ColdScanFull) {
   auto read_cb = [&](std::span<u8> key, std::span<u8> payload) -> bool {
     (void)key;
     count++;
-    scan_result[LoadUnaligned<int>(payload.data())] = LoadUnaligned<int>(payload.data());
+    scan_result[__builtin_bswap32((LoadUnaligned<int>(payload.data()) / 100) + 1)] = LoadUnaligned<int>(payload.data());
     return true;
   };
 
   // ScanFullNoOrder
-  std::unordered_set<u32> columnIdxs = {0};
+  std::set<u32> columnIdxs = {0};
   columnrowstore_->ScanFullNoOrder(columnIdxs, read_cb);
   EXPECT_EQ(count, data.size());
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
-    ASSERT_TRUE(scan_result.find(pair.first * 100) != scan_result.end());
-    ASSERT_TRUE(scan_result[pair.first * 100] == pair.second);
+    ASSERT_TRUE(scan_result.find(pair.first) != scan_result.end());
+    ASSERT_TRUE(scan_result[pair.first] == pair.second);
   }
 }
 

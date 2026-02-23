@@ -18,7 +18,7 @@
 #include <functional>
 #include <span>
 #include <tuple>
-#include <unordered_set>
+#include <set>
 #include <utility>
 #include <vector>
 
@@ -43,9 +43,9 @@ class ColumnRowStore : public HKVInterface {
   auto UpdateInPlace(std::span<u8> key, const ModifyPayloadFunc &func, FixedSizeDelta *delta) -> bool override;
   void ScanAscending(std::span<u8> key, const AccessRecordFunc &fn) override;
   void ScanDescending(std::span<u8> key, const AccessRecordFunc &fn) override;
-  void ScanOptimized(std::span<u8> key, const std::unordered_set<u32> &column_idxs, const AccessRecordFunc &fn,
+  void ScanOptimized(std::span<u8> key, const std::set<u32> &column_idxs, const AccessRecordFunc &fn,
                      const bool ascending) override;
-  void ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs, const AccessRecordFunc &fn) override;
+  void ScanFullNoOrder(const std::set<uint32_t> &column_idxs, const AccessRecordFunc &fn) override;
   auto CountEntries() -> u64 override;
   auto SizeInMB() -> float override;
   auto LookUpBlob(std::span<const u8> blob_key, const ComparisonLambda &cmp, const AccessPayloadFunc &read_cb)
@@ -72,7 +72,7 @@ class ColumnRowStore : public HKVInterface {
   std::vector<u32> columnSizes;
   storage::ExtendedBTree hot_data;
   std::vector<ColumnChunk> cold_data;
-  std::unordered_set<u32> allColumnIndices;  // contains all column indices
+  std::set<u32> allColumnIndices;  // contains all column indices
   u32 payloadSize;
    std::vector<u32> columnSizesBeforeSum;
 };

@@ -2,6 +2,7 @@
 #include <stdexcept>
 #include "leanstore/env.h"
 #include "leanstore/statistics.h"
+#include "storage/blob/aliasing_guard.h"
 
 namespace leanstore::storage {
 
@@ -182,37 +183,44 @@ void ColumnRowStore::ConvertHotDataToColdData() {
 #endif
 }
 
-
-// TODO(moritz): multiple blob loads only inside callback?
 /**
  * scan the stored data in no order
  * @param column_idxs list of column indices that should be loaded
  * @param fn record access function
  */
-void ColumnRowStore::ScanFullNoOrder(const std::unordered_set<uint32_t> &column_idxs, const AccessRecordFunc &fn) {
+void ColumnRowStore::ScanFullNoOrder(const std::set<uint32_t> &column_idxs, const AccessRecordFunc &fn) {
   u64 tuples_scanned = 0;
   u8 tmpPayload[payloadSize];
   // for each chunk
   for (ColumnChunk &chunk : cold_data) {
     // load all selected columns
+    std::vector<blob::AliasingGuard> guards;
+    guards.reserve(column_idxs.size());
     for (u32 col_idx : column_idxs) {
-      this->blob_->LoadBlob(chunk.column_parts[col_idx], 0, [](std::span<const uint8_t> data) { (void)data; });
+      this->blob_->LoadGuardBlob(chunk.column_parts[col_idx], 0,
+                                 [&](blob::AliasingGuard &&guard, std::span<const uint8_t> data) {
+                                   (void)data;
+                                   guards.emplace_back(std::move(guard));
+                                 });
     }
     // for each record in this chunk
     for (u32 record_idx = 0; record_idx < chunk.count; record_idx++) {
       // load requested payload columns and fill others with 0
       memset(tmpPayload, 0, payloadSize);
       // copy tuple value for each column
+      u32 i = 0;
       for (u32 column_idx : column_idxs) {
         u32 columnSize = this->columnSizes[column_idx];
         // copy into result vector
-        std::memcpy(tmpPayload + columnSizesBeforeSum[column_idx],
-                    chunk.column_parts[column_idx]->Data() + (record_idx * columnSize), columnSize);
+        std::memcpy(tmpPayload + columnSizesBeforeSum[column_idx], guards[i].GetPtr() + (record_idx * columnSize),
+                    columnSize);
+        i++;
       }
       // read
       tuples_scanned++;
       fn(std::span<u8>(), {tmpPayload, payloadSize});  // TODO key
     }
+    guards.clear();
   }
 
   if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
@@ -225,12 +233,15 @@ void ColumnRowStore::ScanFullNoOrder(const std::unordered_set<uint32_t> &column_
  * @param fn record access function
  * @param ascending whether to scan in ascending or descending key order
  */
-void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u32> &column_idxs,
-                                   const AccessRecordFunc &fn, const bool ascending) {
+void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::set<u32> &column_idxs, const AccessRecordFunc &fn,
+                                   const bool ascending) {
   // iterate over key to row index & lookup row ids
   bool found         = false;
   u64 tuples_scanned = 0;
   ColumnChunk *chunk = nullptr;
+  std::optional<blob::AliasingGuard> idxGuard;
+  std::vector<blob::AliasingGuard> guards;
+  u8 tmpPayload[payloadSize];
   if (ascending) {
     // scan by ascending order
     row_id_index.ScanAscending(key, [&](std::span<u8> tmp_key, std::span<u8> tmp_row_id) {
@@ -242,27 +253,39 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         // row id in the already loaded blob
       } else {
         // new chunk needs to be loaded
-        if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+        if (chunk != nullptr) {
+          idxGuard.reset();
+          guards.clear();
+          this->blob_->UnloadAllBlobs();
+        }
         chunk = FindChunkInColdData(tmpRowIdU64);
         if (chunk == nullptr) {
           throw std::runtime_error("key in index, but not in hot or cold data (chunk not found)");
         }
         // load blobs
-        this->blob_->LoadBlob(chunk->idx_column, 0, [](std::span<const uint8_t> data) {(void) data;});
+        this->blob_->LoadGuardBlob(chunk->idx_column, 0, [&](blob::AliasingGuard guard, std::span<const uint8_t> data) {
+          (void)data;
+          idxGuard.emplace(std::move(guard));
+        });
         for (u32 column_idx : column_idxs) {
-          this->blob_->LoadBlob(chunk->column_parts[column_idx], 0, [](std::span<const uint8_t> data) {(void) data;});
+          this->blob_->LoadGuardBlob(chunk->column_parts[column_idx], 0,
+                                     [&](blob::AliasingGuard guard, std::span<const uint8_t> data) {
+                                       (void)data;
+                                       guards.emplace_back(std::move(guard));
+                                     });
         }
       }
       // get record from chunk
       // find idx in row id column
-      int idx = -1;
+      int idx    = -1;
+      u8 *idxPtr = idxGuard.value().GetPtr();
       // find idx with binary search
       u32 lower = 0;             // inclusive
       u32 upper = chunk->count;  // exclusive
       // binary search on remaining range
       while (lower < upper) {
         auto mid = lower + ((upper - lower) / 2);
-        auto cmp = std::memcmp(chunk->idx_column->Data() + (mid * sizeof(u64)), tmp_row_id.data(), sizeof(uint64_t));
+        auto cmp = std::memcmp(idxPtr + (mid * sizeof(u64)), tmp_row_id.data(), sizeof(uint64_t));
         if (cmp < 0) {
           lower = mid + 1;
         } else if (cmp > 0) {
@@ -274,29 +297,23 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
       }
 
       if (idx == -1) {
+        idxGuard.reset();
+        guards.clear();
         this->blob_->UnloadAllBlobs();
         throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
       }
       // load requested payload columns and fill others with 0
-      std::vector<u8> result;
+      memset(tmpPayload, 0, payloadSize);
       // copy tuple value for each column
-      for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
+      u32 i = 0;
+      for (u32 column_idx : column_idxs) {
         u32 columnSize = this->columnSizes[column_idx];
-        if (column_idxs.contains(column_idx)) {
-          // load column
-          // copy into result vector
-          for (u32 i = 0; i < columnSize; i++) {
-            result.push_back(*(chunk->column_parts[column_idx]->Data() + (idx * columnSize + i)));
-          }
-
-        } else {
-          // fill with 0s
-          result.resize(result.size() + columnSize, 0);
-        }
+        std::memcpy(tmpPayload + columnSizesBeforeSum[column_idx], guards[i].GetPtr() + (idx * columnSize), columnSize);
+        i++;
       }
       // read
       tuples_scanned++;
-      found = fn(tmp_key, result);
+      found = fn(tmp_key, {tmpPayload, payloadSize});
 
       return found;
     });
@@ -311,65 +328,78 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::unordered_set<u
         // row id in the already loaded blob
       } else {
         // new chunk needs to be loaded
-        if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+        if (chunk != nullptr) {
+          idxGuard.reset();
+          guards.clear();
+          this->blob_->UnloadAllBlobs();
+        }
         chunk = FindChunkInColdData(tmpRowIdU64);
-        if (chunk == nullptr) { throw std::runtime_error("key in index, but in hot or cold data (chunk not found)"); }
+        if (chunk == nullptr) {
+          throw std::runtime_error("key in index, but not in hot or cold data (chunk not found)");
+        }
+        // load blobs
+        this->blob_->LoadGuardBlob(chunk->idx_column, 0, [&](blob::AliasingGuard guard, std::span<const uint8_t> data) {
+          (void)data;
+          idxGuard.emplace(std::move(guard));
+        });
+        for (u32 column_idx : column_idxs) {
+          this->blob_->LoadGuardBlob(chunk->column_parts[column_idx], 0,
+                                     [&](blob::AliasingGuard guard, std::span<const uint8_t> data) {
+                                       (void)data;
+                                       guards.emplace_back(std::move(guard));
+                                     });
+        }
       }
       // get record from chunk
       // find idx in row id column
-      int idx = -1;
-      this->blob_->LoadBlob(chunk->idx_column, 0, [&idx, &chunk, &tmpRowIdU64](std::span<const uint8_t> data) {
-        // find idx with binary search
-        u32 lower = 0;             // inclusive
-        u32 upper = chunk->count;  // exclusive
-        // binary search on remaining range
-        const u64 *row_id_columns = reinterpret_cast<const u64 *>(data.data());
-        while (lower < upper) {
-          auto mid = lower + ((upper - lower) / 2);
-          auto cmp = std::memcmp(row_id_columns + mid, &tmpRowIdU64, sizeof(uint64_t));
-          if (cmp < 0) {
-            lower = mid + 1;
-          } else if (cmp > 0) {
-            upper = mid;
-          } else {
-            idx = mid;
-            break;
-          }
+      int idx    = -1;
+      u8 *idxPtr = idxGuard.value().GetPtr();
+      // find idx with binary search
+      u32 lower = 0;             // inclusive
+      u32 upper = chunk->count;  // exclusive
+      // binary search on remaining range
+      while (lower < upper) {
+        auto mid = lower + ((upper - lower) / 2);
+        auto cmp = std::memcmp(idxPtr + (mid * sizeof(u64)), tmp_row_id.data(), sizeof(uint64_t));
+        if (cmp < 0) {
+          lower = mid + 1;
+        } else if (cmp > 0) {
+          upper = mid;
+        } else {
+          idx = mid;
+          break;
         }
-      });
+      }
+
       if (idx == -1) {
+        idxGuard.reset();
+        guards.clear();
         this->blob_->UnloadAllBlobs();
-        throw std::runtime_error("key in index, but in hot or cold data (index in chunk not found)");
+        throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
       }
       // load requested payload columns and fill others with 0
-      std::vector<u8> result;
+      memset(tmpPayload, 0, payloadSize);
       // copy tuple value for each column
-      for (u32 column_idx = 0; column_idx < this->columnSizes.size(); column_idx++) {
+      u32 i = 0;
+      for (u32 column_idx : column_idxs) {
         u32 columnSize = this->columnSizes[column_idx];
-        if (column_idxs.contains(column_idx)) {
-          // load column
-          this->blob_->LoadBlob(chunk->column_parts[column_idx], 0,
-                                [&idx, &result, &columnSize](std::span<const uint8_t> data) {
-                                  // copy into result vector
-                                  for (u32 i = 0; i < columnSize; i++) {
-                                    result.push_back(*(data.data() + (idx * columnSize + i)));
-                                  }
-                                });
-        } else {
-          // fill with 0s
-          result.resize(result.size() + columnSize, 0);
-        }
+        std::memcpy(tmpPayload + columnSizesBeforeSum[column_idx], guards[i].GetPtr() + (idx * columnSize), columnSize);
+        i++;
       }
       // read
       tuples_scanned++;
-      found = fn(tmp_key, result);
+      found = fn(tmp_key, {tmpPayload, payloadSize});
 
       return found;
     });
   }
 
   // unload column chunk
-  if (chunk != nullptr) { this->blob_->UnloadAllBlobs(); }
+  if (chunk != nullptr) {
+    idxGuard.reset();
+    guards.clear();
+    this->blob_->UnloadAllBlobs();
+  }
 
   if (start_profiling) { statistics::total_scanned_tuples += tuples_scanned; }
 }

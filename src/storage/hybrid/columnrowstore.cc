@@ -191,6 +191,7 @@ void ColumnRowStore::ConvertHotDataToColdData() {
 void ColumnRowStore::ScanFullNoOrder(const std::set<uint32_t> &column_idxs, const AccessRecordFunc &fn) {
   u64 tuples_scanned = 0;
   u8 tmpPayload[payloadSize];
+  memset(tmpPayload, 0, payloadSize);
   // for each chunk
   for (ColumnChunk &chunk : cold_data) {
     // load all selected columns
@@ -205,8 +206,7 @@ void ColumnRowStore::ScanFullNoOrder(const std::set<uint32_t> &column_idxs, cons
     }
     // for each record in this chunk
     for (u32 record_idx = 0; record_idx < chunk.count; record_idx++) {
-      // load requested payload columns and fill others with 0
-      memset(tmpPayload, 0, payloadSize);
+      // load requested payload columns
       // copy tuple value for each column
       u32 i = 0;
       for (u32 column_idx : column_idxs) {
@@ -217,9 +217,9 @@ void ColumnRowStore::ScanFullNoOrder(const std::set<uint32_t> &column_idxs, cons
         i++;
       }
       // read
-      tuples_scanned++;
       fn(std::span<u8>(), {tmpPayload, payloadSize});  // TODO key
     }
+    tuples_scanned += chunk.count;
     guards.clear();
   }
 
@@ -242,6 +242,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::set<u32> &colum
   std::optional<blob::AliasingGuard> idxGuard;
   std::vector<blob::AliasingGuard> guards;
   u8 tmpPayload[payloadSize];
+  memset(tmpPayload, 0, payloadSize);
   if (ascending) {
     // scan by ascending order
     row_id_index.ScanAscending(key, [&](std::span<u8> tmp_key, std::span<u8> tmp_row_id) {
@@ -302,8 +303,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::set<u32> &colum
         this->blob_->UnloadAllBlobs();
         throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
       }
-      // load requested payload columns and fill others with 0
-      memset(tmpPayload, 0, payloadSize);
+      // load requested payload columns
       // copy tuple value for each column
       u32 i = 0;
       for (u32 column_idx : column_idxs) {
@@ -377,8 +377,7 @@ void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::set<u32> &colum
         this->blob_->UnloadAllBlobs();
         throw std::runtime_error("key in index, but not in hot or cold data (index in chunk not found)");
       }
-      // load requested payload columns and fill others with 0
-      memset(tmpPayload, 0, payloadSize);
+      // load requested payload columns
       // copy tuple value for each column
       u32 i = 0;
       for (u32 column_idx : column_idxs) {

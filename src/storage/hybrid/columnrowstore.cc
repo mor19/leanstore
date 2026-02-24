@@ -31,7 +31,7 @@ ColumnRowStore::ColumnRowStore(buffer::BufferManager *buffer_pool, blob::BlobMan
   payloadSize = 0;
   // generate vector with all column indices
   for (u32 i = 0; i < this->columnSizes.size(); i++) {
-    allColumnIndices.insert(i);
+    allColumnIndices.push_back(i);
     columnSizesBeforeSum.push_back(payloadSize);
     payloadSize += this->columnSizes[i];
   }
@@ -188,7 +188,7 @@ void ColumnRowStore::ConvertHotDataToColdData() {
  * @param column_idxs list of column indices that should be loaded
  * @param fn record access function
  */
-void ColumnRowStore::ScanFullNoOrder(const std::set<uint32_t> &column_idxs, const AccessRecordFunc &fn) {
+void ColumnRowStore::ScanFullNoOrder(const std::vector<uint32_t> &column_idxs, const AccessRecordFunc &fn) {
   u64 tuples_scanned = 0;
   u8 tmpPayload[payloadSize];
   memset(tmpPayload, 0, payloadSize);
@@ -233,7 +233,7 @@ void ColumnRowStore::ScanFullNoOrder(const std::set<uint32_t> &column_idxs, cons
  * @param fn record access function
  * @param ascending whether to scan in ascending or descending key order
  */
-void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::set<u32> &column_idxs, const AccessRecordFunc &fn,
+void ColumnRowStore::ScanOptimized(std::span<u8> key, const std::vector<u32> &column_idxs, const AccessRecordFunc &fn,
                                    const bool ascending) {
   // iterate over key to row index & lookup row ids
   bool found         = false;

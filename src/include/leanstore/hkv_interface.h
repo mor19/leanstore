@@ -6,7 +6,7 @@
 
 #include <functional>
 #include <span>
-#include <set>
+#include <vector>
 
 namespace leanstore {
 
@@ -15,9 +15,9 @@ class HKVInterface : public KVInterface {
   virtual ~HKVInterface() = default;
 
   // -------------------------------------------------------------------------------------
-  virtual void ScanOptimized(std::span<u8> key, const std::set<u32> &column_idxs, const AccessRecordFunc &fn,
+  virtual void ScanOptimized(std::span<u8> key, const std::vector<u32> &column_idxs, const AccessRecordFunc &fn,
                              const bool ascending)                           = 0;
-  virtual void ScanFullNoOrder(const std::set<uint32_t> &column_idxs,
+  virtual void ScanFullNoOrder(const std::vector<uint32_t> &column_idxs,
                                     const AccessRecordFunc &found_record_cb) = 0;
   virtual void ConvertHotDataToColdData()                                    = 0;
 };

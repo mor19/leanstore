@@ -8,7 +8,7 @@
 
 #include <chrono>
 #include <cstring>
-#include <set>
+#include <vector>
 #include <thread>
 #include <unordered_map>
 
@@ -162,7 +162,7 @@ TEST_F(TestColumnRowStore, TreeScan) {
   };
 
   // ScanOptimized
-  std::set<u32> columnIdxs = {0};
+  std::vector<u32> columnIdxs = {0};
   columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
@@ -282,7 +282,7 @@ TEST_F(TestColumnRowStore, ColdTreeScan) {
   // ScanOptimized
   int start_key = 0;
   std::span key{reinterpret_cast<u8 *>(&start_key), sizeof(int)};
-  std::set<u32> columnIdxs = {0};
+  std::vector<u32> columnIdxs = {0};
   columnrowstore_->ScanOptimized(std::span<u8>(), columnIdxs, read_cb, true);
   EXPECT_EQ(scan_result.size(), data.size());
   for (auto &pair : data) {
@@ -336,7 +336,7 @@ TEST_F(TestColumnRowStore, ColdScanFull) {
   };
 
   // ScanFullNoOrder
-  std::set<u32> columnIdxs = {0};
+  std::vector<u32> columnIdxs = {0};
   columnrowstore_->ScanFullNoOrder(columnIdxs, read_cb);
   EXPECT_EQ(count, data.size());
   EXPECT_EQ(scan_result.size(), data.size());

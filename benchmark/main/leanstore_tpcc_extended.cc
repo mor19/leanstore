@@ -99,31 +99,16 @@ auto main(int argc, char **argv) -> int {
       }
     });
     db->worker_pool.JoinAll();
-#ifdef DEBUG
-    spdlog::debug("tpcc operations done. moving hot to cold data");
-#endif
-    // move hot to cold data
-    std::this_thread::sleep_for(std::chrono::seconds(FLAGS_htap_expire_seconds + 1));
-    db->worker_pool.ScheduleSyncJob(0, [&]() {
-      tpcc->InitializeThread();
-      db->StartTransaction();
-      for (auto &[type, ptr] : db->indexes) { ptr->ConvertHotDataToColdData(); }
-      db->CommitTransaction();
-    });
-    db->worker_pool.JoinAll();
-#ifdef DEBUG
-    spdlog::debug("moving hot to cold data done. ");
-#endif
     // scan (measure time!)
     e.startCounters();
     db->worker_pool.ScheduleSyncJob(0, [&]() {
       db->StartTransaction();
-      tpcc->Query2();
+      for (auto i = 0U; i < 100; i++) { tpcc->Query2(); }
       db->CommitTransaction();
     });
+    db->worker_pool.JoinAll();
     e.stopCounters();
     scanDuration += e.getDuration();
-    db->worker_pool.JoinAll();
   }
   ctrl.StopPerfRuntime();
   db->Shutdown();

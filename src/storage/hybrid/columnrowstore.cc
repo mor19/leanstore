@@ -176,6 +176,15 @@ void ColumnRowStore::ScanDescending(std::span<u8> key, const AccessRecordFunc &f
 }
 
 void ColumnRowStore::ConvertHotDataToColdData() {
+  if (cold_data.size() > 0) {
+    // free BLOBs
+    for (ColumnChunk &chunk : cold_data) {
+      for (auto state : chunk.column_parts) { this->blob_->RemoveBlob(state); }
+      this->blob_->RemoveBlob(chunk.idx_column);
+    }
+    // clear cold data
+    cold_data.clear();
+  }
   hot_data.MoveHotDataToColdData();
 #ifdef DEBUG
   spdlog::debug("{}+{}/{} cold+hot/total tuples (deactivate this message for benchmarking!!!)", CountColdEntries(),

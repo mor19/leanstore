@@ -103,9 +103,10 @@ auto main(int argc, char **argv) -> int {
     e.startCounters();
     db->worker_pool.ScheduleSyncJob(0, [&]() {
       db->StartTransaction();
-      tpcc->Query2();
+      for (auto i = 0U; i < 100; i++) { tpcc->Query2(); }
       db->CommitTransaction();
     });
+    db->worker_pool.JoinAll();
     e.stopCounters();
     scanDuration += e.getDuration();
   }
